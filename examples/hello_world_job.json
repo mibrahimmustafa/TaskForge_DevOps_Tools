@@ -1,0 +1,11 @@
+{
+  "id": "job-hello-world",
+  "name": "hello-world",
+  "description": "Simple hello world demonstration job",
+  "trigger": "interval",
+  "trigger_expr": "every 1m",
+  "executor": "shell",
+  "command": "echo 'Hello from TaskForge at %TIME%!'",
+  "status": "active",
+  "tags": ["demo", "getting-started"]
+}

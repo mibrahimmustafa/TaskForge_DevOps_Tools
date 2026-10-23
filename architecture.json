@@ -1,0 +1,40 @@
+{
+  "project": "TaskForge",
+  "version": "0.1.0",
+  "description": "General-purpose extensible DevOps task scheduler in Python",
+  "architecture": {
+    "core": {
+      "scheduler": "APScheduler 3.x AsyncIOScheduler wrapper",
+      "event_bus": "Async in-memory Pub/Sub event bus",
+      "config": "Pydantic-based 12-factor configuration",
+      "logging": "Structured JSON logging with structlog",
+      "metrics": "Prometheus metric counters, histograms, and gauges"
+    },
+    "storage": {
+      "interface": "StorageBackend abstract class",
+      "backends": ["SQLiteStorage (aiosqlite)", "PostgreSQL (planned)"]
+    },
+    "executors": {
+      "interface": "BaseExecutor strategy",
+      "types": ["shell", "python", "http", "docker", "k8s (plugin)"]
+    },
+    "triggers": {
+      "interface": "BaseTrigger",
+      "types": ["cron", "interval", "webhook", "event", "oneshot"]
+    },
+    "api": {
+      "framework": "FastAPI",
+      "server": "Uvicorn ASGI",
+      "features": ["OpenAPI docs (/docs)", "Prometheus metrics (/metrics)", "Health check (/health)", "Dashboard SPA (/dashboard)"]
+    },
+    "ui": {
+      "type": "Single Page Application (SPA)",
+      "technology": ["Vanilla HTML5", "Vanilla CSS3 design tokens", "Vanilla JS", "Chart.js"],
+      "pages": ["Dashboard", "Jobs Management", "Live Execution Logs", "Triggers", "Notifications", "Observability/Metrics", "System Health", "Plugins", "Settings"]
+    },
+    "cli": {
+      "framework": "Typer + Rich",
+      "commands": ["taskforge server start", "taskforge jobs list", "taskforge jobs create", "taskforge jobs run", "taskforge version"]
+    }
+  }
+}

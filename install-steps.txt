@@ -1,0 +1,156 @@
+================================================================
+ TaskForge — خطوات التثبيت والتشغيل على Windows (PowerShell)
+================================================================
+
+[ المتطلبات ]
+--------------
+- Python 3.11 أو أحدث
+- pip (مدمج مع Python)
+- Docker (اختياري — للتشغيل بالحاوية)
+
+
+================================================================
+ الخطوة 1 — التحقق من Python
+================================================================
+
+  python --version
+  pip --version
+
+  إذا لم يكن Python مثبتاً، حمّله من:
+  https://www.python.org/downloads/
+
+
+================================================================
+ الخطوة 2 — إنشاء بيئة افتراضية (موصى به)
+================================================================
+
+  python -m venv .venv
+  .venv\Scripts\Activate.ps1
+
+  ملاحظة: إذا ظهر خطأ execution policy، نفّذ أولاً:
+  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+
+================================================================
+ الخطوة 3 — تثبيت المكتبات
+================================================================
+
+  pip install fastapi "uvicorn[standard]" apscheduler pydantic `
+    sqlalchemy aiosqlite httpx typer rich structlog `
+    prometheus-client "python-jose[cryptography]" `
+    "passlib[bcrypt]" python-multipart
+
+  ثم تثبيت المشروع نفسه (يُفعّل أمر taskforge في الترمينال):
+  pip install -e .
+
+
+================================================================
+ الخطوة 4 — إعداد ملف البيئة
+================================================================
+
+  copy .env.example .env
+
+  افتح .env وتأكد من وجود هذه القيم:
+
+    TASKFORGE_SECRET_KEY=change-me-to-a-long-random-secret
+    TASKFORGE_STORAGE_URL=sqlite+aiosqlite:///taskforge.db
+    TASKFORGE_LOG_LEVEL=info
+    TASKFORGE_METRICS_ENABLED=true
+
+
+================================================================
+ الخطوة 5 — تشغيل السيرفر
+================================================================
+
+  الطريقة 1 — عبر CLI (بعد pip install -e .):
+    taskforge server start
+
+  الطريقة 2 — مباشرة عبر uvicorn (بدون pip install -e .):
+    uvicorn taskforge.api.app:create_app --factory --host 0.0.0.0 --port 8080 --reload
+
+  عند النجاح ستظهر رسالة:
+    INFO: Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+
+
+================================================================
+ الخطوة 6 — التحقق من التشغيل (في ترمينال جديد)
+================================================================
+
+  تحقق من الصحة:
+    curl http://localhost:8080/health
+
+  أو افتح في المتصفح:
+    http://localhost:8080/         <-- لوحة التحكم الإدارية التفاعلية (Web Dashboard)
+    http://localhost:8080/docs     <-- Swagger UI (توثيق API التفاعلي)
+    http://localhost:8080/metrics  <-- Prometheus metrics
+    http://localhost:8080/health   <-- Health check
+
+
+================================================================
+ الخطوة 7 — إنشاء أول Job وتشغيله
+================================================================
+
+  إنشاء job من ملف مثال:
+    taskforge jobs create examples\hello_world_job.json
+
+  عرض الـ jobs:
+    taskforge jobs list
+
+  تشغيل job فوري:
+    taskforge jobs run <job-id>
+
+  عرض اللوجات:
+    taskforge logs runs <job-id>
+    taskforge logs show <run-id>
+
+
+================================================================
+ الخطوة 8 — تشغيل الاختبارات
+================================================================
+
+  pip install pytest pytest-asyncio pytest-cov
+
+  تشغيل كل الاختبارات:
+    pytest tests/ -v
+
+  مع تقرير التغطية:
+    pytest tests/ --cov=taskforge --cov-report=html
+
+
+================================================================
+ حل المشكلات الشائعة
+================================================================
+
+المشكلة: taskforge لا يُعرف كأمر
+الحل:    تأكد أنك داخل البيئة الافتراضية:
+           .venv\Scripts\Activate.ps1
+         ثم نفّذ:
+           pip install -e .
+
+المشكلة: خطأ execution policy عند تفعيل venv
+الحل:    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+المشكلة: ModuleNotFoundError عند تشغيل السيرفر
+الحل:    pip install -e .
+         ثم أعد تفعيل البيئة الافتراضية
+
+المشكلة: Port 8080 مشغول
+الحل:    uvicorn taskforge.api.app:create_app --factory --port 9090
+
+================================================================
+ ملاحظة: Docker غير مطلوب للتشغيل المحلي
+ يمكن تحميله من: https://www.docker.com/products/docker-desktop
+================================================================
+
+
+
+
+------------------------------------------------------------------------------------------------------------
+# 1. تثبيت المشروع نفسه (يفعّل أمر taskforge)
+pip install -e .
+
+# 2. تشغيل السيرفر
+taskforge server start
+
+# أو بدون pip install -e . مباشرة:
+uvicorn taskforge.api.app:create_app --factory --host 0.0.0.0 --port 8080 --reload
