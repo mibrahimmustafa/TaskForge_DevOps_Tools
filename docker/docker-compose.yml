@@ -1,183 +1,52 @@
-# =============================================================================
-# TaskForge — Docker Compose (Development / Single-Node Production)
-# =============================================================================
-# Services:
-#   taskforge  — API server + scheduler
-#   postgres   — Primary database (optional; default is SQLite)
-#   redis      — Distributed lock / result backend (optional)
-#   pgadmin    — Database UI (dev only)
-#   prometheus — Metrics scraper (optional)
-#   grafana    — Metrics dashboard (optional)
-# =============================================================================
-
-version: "3.9"
-
-# ---------------------------------------------------------------------------
-# Shared configuration
-# ---------------------------------------------------------------------------
-x-logging: &default-logging
-  driver: "json-file"
-  options:
-    max-size: "20m"
-    max-file: "5"
-
-# ---------------------------------------------------------------------------
-# Networks
-# ---------------------------------------------------------------------------
-networks:
-  taskforge-net:
-    driver: bridge
-
-# ---------------------------------------------------------------------------
-# Volumes
-# ---------------------------------------------------------------------------
-volumes:
-  postgres-data:
-  redis-data:
-  prometheus-data:
-  grafana-data:
-
-# ---------------------------------------------------------------------------
-# Services
-# ---------------------------------------------------------------------------
 services:
-
-  # -------------------------------------------------------------------------
-  # TaskForge Application
-  # -------------------------------------------------------------------------
-  taskforge:
+  api:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: taskforge:latest
-    container_name: taskforge
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
+    image: taskforge:local
+    ports: ["127.0.0.1:8080:8080"]
+    env_file: ../.taskforge/config.env
     environment:
-      TASKFORGE_STORAGE_URL: "postgresql+asyncpg://taskforge:taskforge@postgres:5432/taskforge"
-      TASKFORGE_SECRET_KEY: "change-me-in-production-use-long-random-string"
-      TASKFORGE_LOG_LEVEL: "info"
-      TASKFORGE_METRICS_ENABLED: "true"
-      # Slack (optional)
-      # TASKFORGE_SLACK_BOT_TOKEN: "xoxb-..."
-      # TASKFORGE_SLACK_DEFAULT_CHANNEL: "#devops-alerts"
+      TASKFORGE_STORAGE_URL: postgresql+asyncpg://taskforge:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/taskforge
+      TASKFORGE_DATA_DIR: /data
+    volumes: ["artifacts:/data"]
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - taskforge-net
-    volumes:
-      - ../logs:/app/logs
-    logging: *default-logging
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+  worker:
+    image: taskforge:local
+    command: ["taskforge", "worker", "start"]
+    env_file: ../.taskforge/config.env
+    environment:
+      TASKFORGE_STORAGE_URL: postgresql+asyncpg://taskforge:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/taskforge
+      TASKFORGE_DATA_DIR: /data
+    volumes: ["artifacts:/data"]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-
-  # -------------------------------------------------------------------------
-  # PostgreSQL
-  # -------------------------------------------------------------------------
+      disable: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
   postgres:
     image: postgres:16-alpine
-    container_name: taskforge-postgres
-    restart: unless-stopped
     environment:
       POSTGRES_USER: taskforge
-      POSTGRES_PASSWORD: taskforge
       POSTGRES_DB: taskforge
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - taskforge-net
-    ports:
-      - "5432:5432"
-    logging: *default-logging
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: ["postgres:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U taskforge"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # -------------------------------------------------------------------------
-  # Redis (distributed lock / optional result backend)
-  # -------------------------------------------------------------------------
-  redis:
-    image: redis:7-alpine
-    container_name: taskforge-redis
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    networks:
-      - taskforge-net
-    ports:
-      - "6379:6379"
-    logging: *default-logging
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # -------------------------------------------------------------------------
-  # pgAdmin (dev only — remove in production)
-  # -------------------------------------------------------------------------
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: taskforge-pgadmin
-    restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@taskforge.local
-      PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "5050:80"
-    depends_on:
-      - postgres
-    networks:
-      - taskforge-net
-    profiles:
-      - dev
-
-  # -------------------------------------------------------------------------
-  # Prometheus
-  # -------------------------------------------------------------------------
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: taskforge-prometheus
-    restart: unless-stopped
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    networks:
-      - taskforge-net
-    ports:
-      - "9090:9090"
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-    profiles:
-      - monitoring
-
-  # -------------------------------------------------------------------------
-  # Grafana
-  # -------------------------------------------------------------------------
-  grafana:
-    image: grafana/grafana:latest
-    container_name: taskforge-grafana
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - grafana-data:/var/lib/grafana
-    networks:
-      - taskforge-net
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
-    profiles:
-      - monitoring
+volumes:
+  postgres:
+  artifacts:

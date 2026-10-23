@@ -56,3 +56,7 @@ htmlcov/
 
 # Logs
 *.log
+.taskforge/
+test-results/
+playwright-report/
+coverage.xml

@@ -1,4 +1,6 @@
+import asyncio
 import json
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -7,34 +9,38 @@ from taskforge.jobs.models import Job
 
 
 class HTTPExecutor(BaseExecutor):
-    async def execute(self, job: Job) -> tuple[int, str]:
-        # format can be: METHOD URL or just URL or JSON configuration
+    async def execute(self, job: Job, *, cwd=None, env=None, sink=None) -> tuple[int, str]:
         cmd = job.command.strip()
-        method = "GET"
-        url = cmd
-        headers = {}
-        payload = None
-
         if cmd.startswith("{"):
-            try:
-                cfg = json.loads(cmd)
-                method = cfg.get("method", "GET").upper()
-                url = cfg.get("url", "")
-                headers = cfg.get("headers", {})
-                payload = cfg.get("body")
-            except Exception:
-                pass
+            config = json.loads(cmd)
         elif " " in cmd:
-            parts = cmd.split(" ", 1)
-            if parts[0].upper() in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"):
-                method = parts[0].upper()
-                url = parts[1].strip()
-
+            method, url = cmd.split(" ", 1)
+            config = {"method": method, "url": url}
+        else:
+            config = {"url": cmd}
+        if urlsplit(config["url"]).scheme not in {"http", "https"}:
+            raise ValueError("Only HTTP(S) URLs are supported")
         try:
-            async with httpx.AsyncClient(timeout=float(job.timeout_seconds)) as client:
-                resp = await client.request(method=method, url=url, headers=headers, json=payload)
-                log = f"HTTP {method} {url} -> {resp.status_code}\n\nResponse:\n{resp.text[:2000]}"
-                exit_code = 0 if resp.is_success else 1
-                return exit_code, log
-        except Exception as e:
-            return 1, f"[HTTP ERROR] Request failed: {e!s}"
+            async with (
+                asyncio.timeout(job.timeout_seconds),
+                httpx.AsyncClient(
+                    timeout=job.timeout_seconds, follow_redirects=False, trust_env=False
+                ) as client,
+                client.stream(
+                    config.get("method", "GET").upper(),
+                    config["url"],
+                    headers=config.get("headers", {}),
+                    json=config.get("body"),
+                ) as response,
+            ):
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk[: max(0, 65536 - len(data))])
+                    if len(data) >= 65536:
+                        break
+                output = f"HTTP {response.status_code}\n" + data.decode("utf-8", "replace")
+                if sink:
+                    await sink(output)
+                return (0 if response.is_success else 1), output
+        except TimeoutError:
+            return -1, "[TIMEOUT] HTTP request timed out"

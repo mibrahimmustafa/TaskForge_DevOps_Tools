@@ -1,108 +1,89 @@
-from unittest.mock import AsyncMock, patch
+import asyncio
+import sys
 
 import httpx
 import pytest
 
+from taskforge.executors.docker import DockerExecutor
 from taskforge.executors.http import HTTPExecutor
 from taskforge.executors.python_callable import PythonExecutor
 from taskforge.executors.shell import ShellExecutor
-from taskforge.jobs.models import ExecutorType, Job
+from taskforge.jobs.models import Job
 
 
-@pytest.mark.asyncio
 async def test_shell_executor_success():
-    executor = ShellExecutor()
-    cmd = "echo TaskForge"
-    job = Job(
-        id="job-shell-test",
-        name="shell-test",
-        executor=ExecutorType.SHELL,
-        command=cmd,
-        timeout_seconds=10,
+    code, logs = await ShellExecutor().execute(
+        Job(id="test", name="Test", command="echo TaskForge")
     )
-    exit_code, logs = await executor.execute(job)
-    assert exit_code == 0
-    assert "TaskForge" in logs
+    assert code == 0 and "TaskForge" in logs
 
 
-@pytest.mark.asyncio
 async def test_shell_executor_timeout():
-    executor = ShellExecutor()
-    # sleep for 5 seconds with a 1 second timeout
-    cmd = 'python -c "import time; time.sleep(5)"'
-    job = Job(
-        id="job-shell-timeout",
-        name="shell-timeout",
-        executor=ExecutorType.SHELL,
-        command=cmd,
-        timeout_seconds=1,
+    command = f'"{sys.executable}" -c "import time; time.sleep(5)"'
+    code, logs = await ShellExecutor().execute(
+        Job(id="test", name="Test", command=command, timeout_seconds=1)
     )
-    exit_code, logs = await executor.execute(job)
-    assert exit_code == -1
-    assert "timed out" in logs.lower()
+    assert code == -1 and "timed out" in logs
 
 
-@pytest.mark.asyncio
-async def test_python_executor_success():
+async def test_python_executor_success_and_error():
     executor = PythonExecutor()
-    job = Job(
-        id="job-py-test",
-        name="python-test",
-        executor=ExecutorType.PYTHON,
-        command="print('Hello from PythonExecutor')",
-        timeout_seconds=5,
+    code, output = await executor.execute(Job(id="test", name="Test", command="print('hello')"))
+    assert code == 0 and "hello" in output
+    code, output = await executor.execute(
+        Job(id="test", name="Test", command="raise ValueError('intentional')")
     )
-    exit_code, logs = await executor.execute(job)
-    assert exit_code == 0
-    assert "Hello from PythonExecutor" in logs
+    assert code != 0 and "intentional" in output
 
 
-@pytest.mark.asyncio
-async def test_python_executor_error():
-    executor = PythonExecutor()
-    job = Job(
-        id="job-py-err",
-        name="python-err",
-        executor=ExecutorType.PYTHON,
-        command="raise ValueError('Intentional failure')",
-        timeout_seconds=5,
+async def test_python_timeout_prevents_late_side_effect(tmp_path):
+    marker = tmp_path / "late"
+    command = f"import time; from pathlib import Path; time.sleep(2); Path({str(marker)!r}).touch()"
+    code, _ = await PythonExecutor().execute(
+        Job(id="test", name="Test", command=command, timeout_seconds=1)
     )
-    exit_code, logs = await executor.execute(job)
-    assert exit_code == 1
-    assert "ValueError: Intentional failure" in logs
+    assert code == -1
+    await asyncio.sleep(1.3)
+    assert not marker.exists()
 
 
-@pytest.mark.asyncio
-async def test_python_executor_timeout():
-    executor = PythonExecutor()
-    job = Job(
-        id="job-py-timeout",
-        name="python-timeout",
-        executor=ExecutorType.PYTHON,
-        command="import time\ntime.sleep(5)",
-        timeout_seconds=1,
+async def test_output_is_bounded_and_streamed():
+    chunks = []
+
+    async def sink(text):
+        chunks.append(text)
+
+    code, output = await PythonExecutor().execute(
+        Job(id="test", name="Test", command="print('x' * 3000000)"), sink=sink
     )
-    exit_code, logs = await executor.execute(job)
-    assert exit_code == -1
-    assert "timeout" in logs.lower()
+    assert code == 0 and len(output) <= 2 * 1024 * 1024
+    assert len(chunks) > 1 and "".join(chunks) == output
 
 
-@pytest.mark.asyncio
-async def test_http_executor_success():
-    executor = HTTPExecutor()
-    job = Job(
-        id="job-http-test",
-        name="http-test",
-        executor=ExecutorType.HTTP,
-        command="GET https://httpbin.org/get",
-        timeout_seconds=10,
+async def test_http_executor_success(monkeypatch):
+    original = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text="verified"))
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kwargs: original(transport=transport, **kwargs)
     )
-
-    mock_resp = httpx.Response(
-        200, text='{"success": true}', request=httpx.Request("GET", "https://httpbin.org/get")
+    code, output = await HTTPExecutor().execute(
+        Job(id="test", name="Test", command="GET https://example.test/")
     )
-    with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_request:
-        mock_request.return_value = mock_resp
-        exit_code, logs = await executor.execute(job)
-        assert exit_code == 0
-        assert "HTTP GET https://httpbin.org/get -> 200" in logs
+    assert code == 0 and "HTTP 200" in output and "verified" in output
+
+
+async def test_docker_cleanup_and_structured_arguments(monkeypatch, tmp_path):
+    calls = []
+
+    async def fake(args, timeout, **kwargs):
+        calls.append(args)
+        return -1, "timeout"
+
+    monkeypatch.setattr("taskforge.executors.docker.run_process", fake)
+    job = Job(id="test", name="Test", image="alpine:3.20", command="echo hello")
+    await DockerExecutor().execute(job, cwd=tmp_path)
+    assert "--cap-drop=ALL" in calls[0]
+    assert calls[0][-3:] == ["sh", "-c", "echo hello"]
+    assert calls[-1][:3] == ["docker", "rm", "-f"]
+    with pytest.raises(ValueError):
+        await DockerExecutor().execute(job.model_copy(update={"image": "alpine; echo bad"}))

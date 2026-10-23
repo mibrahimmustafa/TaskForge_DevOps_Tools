@@ -1,19 +1,36 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Request
 
-from taskforge.plugins.loader import plugin_loader
+from taskforge.api.auth import Principal, authenticate
 
-router = APIRouter(prefix="/plugins", tags=["Plugins"])
+router = APIRouter(prefix="/plugins", tags=["Extensions"])
 
 
 @router.get("")
-async def list_plugins():
-    return plugin_loader.get_all()
-
-
-@router.post("/{plugin_id}/toggle")
-async def toggle_plugin(plugin_id: str):
-    if plugin_id not in plugin_loader.plugins:
-        raise HTTPException(status_code=404, detail="Plugin not found")
-    p = plugin_loader.plugins[plugin_id]
-    p["enabled"] = not p.get("enabled", False)
-    return p
+async def list_plugins(request: Request, principal: Principal = Depends(authenticate)):
+    settings = request.app.state.settings
+    return [
+        {
+            "id": "github_push",
+            "name": "GitHub push triggers",
+            "enabled": bool(settings.github_secret),
+            "type": "trigger",
+        },
+        {
+            "id": "webhook_notifications",
+            "name": "Webhook notifications",
+            "enabled": bool(settings.notification_url),
+            "type": "notifier",
+        },
+        {
+            "id": "docker",
+            "name": "Docker deployment",
+            "enabled": any(t["type"] == "docker" for t in settings.deployment_targets.values()),
+            "type": "deployment",
+        },
+        {
+            "id": "kubernetes",
+            "name": "Kubernetes deployment",
+            "enabled": any(t["type"] == "kubernetes" for t in settings.deployment_targets.values()),
+            "type": "deployment",
+        },
+    ]

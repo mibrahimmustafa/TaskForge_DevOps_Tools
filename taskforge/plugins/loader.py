@@ -1,56 +1,29 @@
-from typing import Any
+"""Explicit registry: only installed, administrator-selected extensions may be loaded."""
+
+from importlib.metadata import entry_points
+
+from taskforge.plugins.base import BasePlugin
 
 
 class PluginLoader:
-    def __init__(self) -> None:
-        self.plugins: dict[str, dict[str, Any]] = {}
+    def __init__(self):
+        self.plugins: dict[str, BasePlugin] = {}
 
-    def register_builtin_plugins(self) -> None:
-        # Pre-register built-in catalog plugins
-        builtins = [
-            {
-                "id": "k8s_executor",
-                "name": "K8s Executor",
-                "version": "0.3.2",
-                "desc": "Run TaskForge jobs as Kubernetes Jobs. Supports resource limits, namespaces, service accounts, and pod tolerations.",
-                "type": "executor",
-                "icon": "⚓",
-                "enabled": True,
-            },
-            {
-                "id": "discord_notifier",
-                "name": "Discord Notifier",
-                "version": "0.2.0",
-                "desc": "Send rich embed notifications to Discord channels via webhooks. Configurable color, emoji, and mention support.",
-                "type": "notifier",
-                "icon": "💬",
-                "enabled": False,
-            },
-            {
-                "id": "git_trigger",
-                "name": "Git Trigger",
-                "version": "0.1.5",
-                "desc": "Trigger jobs on GitHub/GitLab push, PR, tag, and release events. Validates webhook signatures automatically.",
-                "type": "trigger",
-                "icon": "🐙",
-                "enabled": True,
-            },
-            {
-                "id": "datadog_metrics",
-                "name": "Datadog Metrics",
-                "version": "0.1.0",
-                "desc": "Export TaskForge metrics to Datadog. Supports custom tags, service checks, and event tracking.",
-                "type": "observability",
-                "icon": "📊",
-                "enabled": False,
-            },
-        ]
-        for b in builtins:
-            self.plugins[b["id"]] = b  # type: ignore
+    async def load(self, names: list[str], context: dict):
+        available = {entry.name: entry for entry in entry_points(group="taskforge.plugins")}
+        for name in names:
+            if name not in available:
+                raise ValueError(f"Plugin is not installed: {name}")
+            instance = available[name].load()()
+            if not isinstance(instance, BasePlugin):
+                raise TypeError(f"Invalid plugin: {name}")
+            await instance.on_load(context)
+            self.plugins[name] = instance
 
-    def get_all(self) -> list[dict[str, Any]]:
-        return list(self.plugins.values())
+    async def close(self):
+        for instance in reversed(list(self.plugins.values())):
+            await instance.on_unload()
+        self.plugins.clear()
 
 
 plugin_loader = PluginLoader()
-plugin_loader.register_builtin_plugins()

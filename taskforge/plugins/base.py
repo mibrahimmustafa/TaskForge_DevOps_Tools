@@ -3,14 +3,10 @@ from typing import Any
 
 
 class BasePlugin(ABC):
-    id: str = "base"
-    name: str = "Base Plugin"
-    version: str = "0.1.0"
-    description: str = ""
-    icon: str = "🔌"
-    plugin_type: str = "general"
-    enabled: bool = True
-
     @abstractmethod
     async def on_load(self, app_context: dict[str, Any]) -> None:
-        pass
+        """Register extensions through the explicit worker context."""
+
+    async def on_unload(self) -> None:
+        """Release extension resources."""
+        return None

@@ -58,5 +58,5 @@ def test_get_trigger_factory():
     webhook = get_trigger(TriggerType.WEBHOOK, "token-123")
     assert isinstance(webhook, WebhookTrigger)
 
-    oneshot = get_trigger(TriggerType.ONESHOT, "2026-10-23T12:00:00")
+    oneshot = get_trigger(TriggerType.ONESHOT, "2026-10-23T12:00:00+00:00")
     assert isinstance(oneshot, OneShotTrigger)

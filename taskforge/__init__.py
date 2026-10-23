@@ -1,5 +1,3 @@
-"""
-TaskForge - Open-Source DevOps Task Scheduler
-"""
+"""TaskForge: authenticated task and pipeline orchestration."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

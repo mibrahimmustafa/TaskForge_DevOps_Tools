@@ -1,136 +1,146 @@
 import asyncio
 import json
+import os
+import secrets
 from pathlib import Path
 
+import httpx
 import typer
-from rich.console import Console
-from rich.table import Table
 
-# Ensure UTF-8 or safe console
-console = Console(highlight=False)
+from taskforge.core.config import get_settings
 
-app = typer.Typer(help="TaskForge - DevOps Task Scheduler CLI")
-jobs_app = typer.Typer(help="Manage scheduled jobs")
-server_app = typer.Typer(help="Manage TaskForge server")
-
+app = typer.Typer(help="TaskForge pipeline operations")
+jobs_app = typer.Typer(help="Manage jobs through the authenticated API")
+server_app = typer.Typer(help="Run the API and dashboard")
+worker_app = typer.Typer(help="Run an independent execution worker")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(server_app, name="server")
+app.add_typer(worker_app, name="worker")
+
+
+def request(method: str, path: str, body=None):
+    token = os.getenv("TASKFORGE_API_TOKEN", "")
+    if not token:
+        raise typer.BadParameter("Set TASKFORGE_API_TOKEN")
+    base = os.getenv("TASKFORGE_API_URL", "http://127.0.0.1:8080").rstrip("/")
+    with httpx.Client(timeout=30, trust_env=False) as client:
+        response = client.request(
+            method, base + "/api" + path, headers={"Authorization": f"Bearer {token}"}, json=body
+        )
+    if response.is_error:
+        typer.echo(response.text, err=True)
+        raise typer.Exit(1)
+    typer.echo(json.dumps(response.json(), indent=2))
 
 
 @server_app.command("start")
-def start_server(
-    host: str = typer.Option("0.0.0.0", help="Host to bind to"),
-    port: int = typer.Option(8080, help="Port to listen on"),
-    reload: bool = typer.Option(False, help="Enable auto-reload"),
-):
-    """Start the TaskForge API and Dashboard server."""
+def start_server(host: str | None = None, port: int | None = None):
     import uvicorn
 
-    console.print(f"[bold green]Starting TaskForge server on http://{host}:{port}...[/bold green]")
-    uvicorn.run("taskforge.api.app:create_app", factory=True, host=host, port=port, reload=reload)
+    settings = get_settings()
+    uvicorn.run(
+        "taskforge.api.app:create_app",
+        factory=True,
+        host=host or settings.host,
+        port=port or settings.port,
+    )
+
+
+@worker_app.command("start")
+def start_worker():
+    from taskforge.core.worker import Worker
+    from taskforge.storage.database import Database
+
+    settings = get_settings()
+
+    async def serve():
+        database = Database(settings.storage_url)
+        try:
+            await Worker(database, settings).serve()
+        finally:
+            await database.close()
+
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        pass
 
 
 @jobs_app.command("list")
 def list_jobs():
-    """List all configured jobs."""
-
-    async def _list():
-        from taskforge.core.config import get_settings
-        from taskforge.storage.sqlite_backend import SQLiteStorage
-
-        storage = SQLiteStorage(get_settings().storage_url)
-        await storage.initialize()
-        jobs = await storage.get_all_jobs()
-        table = Table(title="TaskForge Jobs")
-        table.add_column("ID", style="cyan")
-        table.add_column("Name", style="bold white")
-        table.add_column("Trigger", style="magenta")
-        table.add_column("Schedule", style="yellow")
-        table.add_column("Executor", style="blue")
-        table.add_column("Status", style="green")
-        table.add_column("Last Run", style="dim")
-
-        for j in jobs:
-            table.add_row(
-                j.id,
-                j.name,
-                j.trigger.value,
-                j.trigger_expr,
-                j.executor.value,
-                j.status.value,
-                j.last_run or "Never",
-            )
-        console.print(table)
-
-    asyncio.run(_list())
+    request("GET", "/jobs")
 
 
 @jobs_app.command("create")
-def create_job(file_path: str = typer.Argument(..., help="Path to JSON file with job definition")):
-    """Create or update a job from a JSON configuration file."""
-
-    async def _create():
-        from taskforge.core.config import get_settings
-        from taskforge.jobs.models import Job
-        from taskforge.storage.sqlite_backend import SQLiteStorage
-
-        p = Path(file_path)
-        if not p.exists():
-            console.print(f"[bold red]File not found: {file_path}[/bold red]")
-            raise typer.Exit(1)
-
-        with open(p, encoding="utf-8") as f:
-            data = json.load(f)
-
-        job = Job(**data)
-        storage = SQLiteStorage(get_settings().storage_url)
-        await storage.initialize()
-        saved = await storage.save_job(job)
-        console.print(
-            f"[bold green][OK] Job created successfully:[/bold green] {saved.id} ({saved.name})"
-        )
-
-    asyncio.run(_create())
+def create_job(file_path: Path):
+    request("POST", "/jobs", json.loads(file_path.read_text(encoding="utf-8")))
 
 
 @jobs_app.command("run")
-def run_job(job_id: str = typer.Argument(..., help="Job ID to run immediately")):
-    """Run a job immediately."""
+def run_job(job_id: str):
+    request("POST", f"/jobs/{job_id}/run")
 
-    async def _run():
-        from taskforge.core.config import get_settings
-        from taskforge.core.scheduler import TaskScheduler
-        from taskforge.storage.sqlite_backend import SQLiteStorage
 
-        storage = SQLiteStorage(get_settings().storage_url)
-        scheduler = TaskScheduler(storage)
-        await scheduler.start()
+@jobs_app.command("pause")
+def pause_job(job_id: str):
+    request("POST", f"/jobs/{job_id}/pause")
 
-        console.print(f"[yellow]Triggering job {job_id}...[/yellow]")
+
+@jobs_app.command("resume")
+def resume_job(job_id: str):
+    request("POST", f"/jobs/{job_id}/resume")
+
+
+@app.command("token")
+def token():
+    """Generate a cryptographically random access token."""
+    typer.echo(secrets.token_urlsafe(48))
+
+
+@app.command("init")
+def initialize():
+    """Create local credentials without overwriting existing configuration."""
+    root = Path(".taskforge")
+    root.mkdir(exist_ok=True)
+    config = root / "config.env"
+    if config.exists():
+        raise typer.BadParameter(".taskforge/config.env already exists; no files changed")
+    entries = [
+        {"name": name, "role": "admin", "projects": ["*"], "token": secrets.token_urlsafe(48)}
+        for name in ("administrator", "release-reviewer")
+    ]
+    with config.open("x", encoding="utf-8") as handle:
+        handle.write("TASKFORGE_TOKENS='" + json.dumps(entries) + "'\n")
+    if os.name != "nt":
+        config.chmod(0o600)
+    typer.echo(
+        "Created .taskforge/config.env. Keep it private. It contains separate admin and reviewer tokens."
+    )
+    typer.echo(
+        "Start the API with 'taskforge server start' and a runner with 'taskforge worker start'."
+    )
+
+
+@app.command("migrate-legacy")
+def migrate_legacy(source: Path):
+    """Import legacy jobs and history into v2 tables, preserving the source database."""
+    from taskforge.storage.database import Database
+    from taskforge.storage.migrate import import_legacy
+
+    async def migrate():
+        database = Database(get_settings().storage_url)
         try:
-            run = await scheduler.execute_job_task(job_id, trigger_type="cli")
-            status_color = "green" if run.status.value == "success" else "red"
-            console.print(
-                f"[{status_color}]Result: {run.status.value.upper()} (duration: {run.duration_str})[/{status_color}]"
-            )
-            if run.logs:
-                console.print(f"\n[bold]Output Logs:[/bold]\n{run.logs}")
-        except Exception as e:
-            console.print(f"[bold red]Execution error: {e!s}[/bold red]")
+            result = await import_legacy(source, database)
+            typer.echo(json.dumps(result, indent=2))
         finally:
-            await scheduler.shutdown()
+            await database.close()
 
-    asyncio.run(_run())
+    asyncio.run(migrate())
 
 
 @app.command("version")
 def version():
-    """Print TaskForge version."""
-    from taskforge import __version__
-
-    console.print(
-        f"[bold cyan]TaskForge[/bold cyan] version [bold white]{__version__}[/bold white]"
-    )
+    typer.echo("TaskForge 0.2.0")
 
 
 if __name__ == "__main__":

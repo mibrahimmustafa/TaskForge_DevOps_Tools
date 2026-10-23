@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "taskforge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Production-grade, extensible DevOps task scheduler"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,21 +17,20 @@ dependencies = [
     "uvicorn[standard]>=0.28.0",
     "apscheduler>=3.10.0,<4.0.0",
     "pydantic>=2.0.0",
-    "sqlalchemy>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.0,<3",
     "aiosqlite>=0.20.0",
     "httpx>=0.27.0",
     "typer>=0.12.0",
     "rich>=13.0.0",
     "structlog>=24.0.0",
     "prometheus-client>=0.20.0",
-    "python-jose[cryptography]>=3.3.0",
-    "passlib[bcrypt]>=1.7.4",
-    "python-multipart>=0.0.9",
     "python-dotenv>=1.0.0"
 ]
 
 [project.optional-dependencies]
 dev = [
+    "pytest-cov>=5.0.0",
+    "build>=1.2.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.3.0",
@@ -42,6 +41,7 @@ dev = [
 postgres = [
     "asyncpg>=0.29.0"
 ]
+browser = ["playwright>=1.50"]
 
 [project.scripts]
 taskforge = "taskforge.cli.main:app"
@@ -49,6 +49,9 @@ taskforge = "taskforge.cli.main:app"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["taskforge*"]
+
+[tool.setuptools.package-data]
+taskforge = ["dashboard/*.html", "dashboard/*.js", "dashboard/*.css"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -61,6 +64,9 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["BLE001", "S102", "S110", "ASYNC230", "E501", "UP042", "SIM105"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]
 
 [tool.mypy]
 python_version = "3.11"
