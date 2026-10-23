@@ -1,40 +1,98 @@
 {
   "project": "TaskForge",
   "version": "0.1.0",
-  "description": "General-purpose extensible DevOps task scheduler in Python",
+  "repository": "https://github.com/mibrahimmustafa/TaskForge_DevOps_Tools.git",
+  "description": "Production-grade, extensible DevOps task scheduler and real-time Web Dashboard in Python",
   "architecture": {
-    "core": {
-      "scheduler": "APScheduler 3.x AsyncIOScheduler wrapper",
-      "event_bus": "Async in-memory Pub/Sub event bus",
-      "config": "Pydantic-based 12-factor configuration",
-      "logging": "Structured JSON logging with structlog",
-      "metrics": "Prometheus metric counters, histograms, and gauges"
+    "presentation_tier": {
+      "web_dashboard": {
+        "type": "Single Page Application (SPA)",
+        "tech_stack": ["HTML5", "Vanilla CSS3", "JavaScript ES6+", "Chart.js"],
+        "served_by": "FastAPI StaticFiles mount at /dashboard and /",
+        "capabilities": [
+          "Overview dashboard with real-time counters and activity ticker",
+          "Jobs table with sorting, search, filtering, and inline controls",
+          "Live execution history and log inspector",
+          "Cron and interval expression builders",
+          "Notification channel manager",
+          "Prometheus metrics visualization",
+          "System health monitor and masked environment inspection",
+          "Plugin manager with toggle switches",
+          "Appearance customizer with Dark/Light mode and 5 accent palettes"
+        ]
+      },
+      "rest_api": {
+        "framework": "FastAPI",
+        "asgi_server": "Uvicorn",
+        "endpoints": [
+          "GET /health",
+          "GET /metrics",
+          "GET /api/jobs",
+          "POST /api/jobs",
+          "GET /api/jobs/{id}",
+          "DELETE /api/jobs/{id}",
+          "POST /api/jobs/{id}/run",
+          "POST /api/jobs/{id}/pause",
+          "POST /api/jobs/{id}/resume",
+          "GET /api/runs",
+          "GET /api/runs/{id}",
+          "POST /api/triggers/webhook/{job_id}",
+          "GET /api/plugins",
+          "POST /api/plugins/{id}/toggle",
+          "GET /api/system/stats",
+          "GET /api/system/env"
+        ]
+      },
+      "command_line_interface": {
+        "framework": "Typer + Rich",
+        "command": "taskforge",
+        "subcommands": ["server start", "jobs list", "jobs create", "jobs run", "version"]
+      }
     },
-    "storage": {
-      "interface": "StorageBackend abstract class",
-      "backends": ["SQLiteStorage (aiosqlite)", "PostgreSQL (planned)"]
+    "core_engine": {
+      "scheduler": {
+        "driver": "APScheduler AsyncIOScheduler",
+        "dispatch_model": "Non-blocking AsyncIO coroutines"
+      },
+      "event_bus": {
+        "type": "Async in-memory Pub/Sub",
+        "events": ["job.started", "job.success", "job.failed"]
+      },
+      "configuration": {
+        "standard": "12-Factor App",
+        "source": "Environment variables (.env)"
+      },
+      "observability": {
+        "logging": "structlog JSON structured logs",
+        "metrics": "Prometheus client (Counters, Histograms, Gauges)"
+      }
     },
-    "executors": {
-      "interface": "BaseExecutor strategy",
-      "types": ["shell", "python", "http", "docker", "k8s (plugin)"]
-    },
-    "triggers": {
+    "trigger_subsystem": {
       "interface": "BaseTrigger",
-      "types": ["cron", "interval", "webhook", "event", "oneshot"]
+      "implementations": [
+        {"type": "cron", "class": "CronTrigger", "syntax": "Standard 5-part crontab"},
+        {"type": "interval", "class": "IntervalTrigger", "syntax": "Natural string (e.g. every 30m, 5s)"},
+        {"type": "webhook", "class": "WebhookTrigger", "auth": "Header token verification"},
+        {"type": "oneshot", "class": "OneShotTrigger", "syntax": "Exact date/time"}
+      ]
     },
-    "api": {
-      "framework": "FastAPI",
-      "server": "Uvicorn ASGI",
-      "features": ["OpenAPI docs (/docs)", "Prometheus metrics (/metrics)", "Health check (/health)", "Dashboard SPA (/dashboard)"]
+    "executor_subsystem": {
+      "interface": "BaseExecutor",
+      "implementations": [
+        {"type": "shell", "class": "ShellExecutor", "support": ["Windows PowerShell/cmd", "Linux bash/sh"]},
+        {"type": "python", "class": "PythonExecutor", "support": "In-process Python execution"},
+        {"type": "http", "class": "HTTPExecutor", "support": "Async HTTP client (httpx)"},
+        {"type": "docker", "class": "DockerExecutor", "support": "CLI-based container runner"}
+      ]
     },
-    "ui": {
-      "type": "Single Page Application (SPA)",
-      "technology": ["Vanilla HTML5", "Vanilla CSS3 design tokens", "Vanilla JS", "Chart.js"],
-      "pages": ["Dashboard", "Jobs Management", "Live Execution Logs", "Triggers", "Notifications", "Observability/Metrics", "System Health", "Plugins", "Settings"]
-    },
-    "cli": {
-      "framework": "Typer + Rich",
-      "commands": ["taskforge server start", "taskforge jobs list", "taskforge jobs create", "taskforge jobs run", "taskforge version"]
+    "storage_tier": {
+      "interface": "StorageBackend",
+      "active_backend": "SQLiteStorage (aiosqlite)",
+      "database_schema": [
+        "jobs (id, name, description, trigger, trigger_expr, executor, command, status, tags, etc.)",
+        "job_runs (id, job_id, job_name, status, started_at, finished_at, duration_seconds, exit_code, logs)"
+      ],
+      "future_backends": ["PostgreSQL (asyncpg)"]
     }
   }
 }

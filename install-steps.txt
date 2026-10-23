@@ -87,21 +87,25 @@
 
 
 ================================================================
- الخطوة 7 — إنشاء أول Job وتشغيله
+ الخطوة 7 — إدارة الـ Jobs وتشغيلها
 ================================================================
 
-  إنشاء job من ملف مثال:
-    taskforge jobs create examples\hello_world_job.json
+  الطريقة الأولى — عبر لوحة الويب (مباشرة وبضغطة زر):
+    1. افتح http://localhost:8080 في المتصفح
+    2. ستجد جميع الوظائف المسجلة جاهزة
+    3. اضغط على زر التشغيل ▶ لتشغيل أي وظيفة فورياً
+    4. اضغط على "+ New Job" لإنشاء وظيفة جديدة عبر النموذج المرئي
+    5. راقب اللوجات الحية والرسوم البيانية في تبويب Live Logs و Dashboard
 
-  عرض الـ jobs:
-    taskforge jobs list
+  الطريقة الثانية — عبر سطر الأوامر (CLI):
+    إنشاء job من ملف مثال:
+      taskforge jobs create examples\hello_world_job.json
 
-  تشغيل job فوري:
-    taskforge jobs run <job-id>
+    عرض قائمة الـ jobs:
+      taskforge jobs list
 
-  عرض اللوجات:
-    taskforge logs runs <job-id>
-    taskforge logs show <run-id>
+    تشغيل job فوري:
+      taskforge jobs run job-hello-world
 
 
 ================================================================
