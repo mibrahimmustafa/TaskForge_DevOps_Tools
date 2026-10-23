@@ -644,21 +644,27 @@ async function initLiveBackendSync() {
 
 async function syncFromLiveApi() {
   try {
-    const [jobsRes, runsRes] = await Promise.all([
+    const [jobsRes, runsRes, statsRes] = await Promise.all([
       fetch('/api/jobs'),
-      fetch('/api/runs')
+      fetch('/api/runs'),
+      fetch('/api/system/stats')
     ]);
     if (jobsRes.ok) {
       const jobs = await jobsRes.json();
-      if (jobs && jobs.length > 0) {
+      if (jobs) {
         state.jobs = jobs;
       }
     }
     if (runsRes.ok) {
       const runs = await runsRes.json();
-      if (runs && runs.length > 0) {
+      if (runs) {
         state.runs = runs;
       }
+    }
+    if (statsRes && statsRes.ok) {
+      const stats = await statsRes.json();
+      state.stats = stats;
+      updateLiveStatsCards(stats);
     }
     renderJobsTable();
     renderDashboardJobs();
@@ -668,6 +674,34 @@ async function syncFromLiveApi() {
   } catch (e) {
     console.error('Failed to sync from live API', e);
   }
+}
+
+function updateLiveStatsCards(stats) {
+  if (!stats) return;
+  const totalJobsCard = document.querySelector('.stat-card--blue .stat-value');
+  if (totalJobsCard) {
+    totalJobsCard.dataset.target = stats.total_jobs ?? state.jobs.length;
+  }
+  const runsCard = document.querySelector('.stat-card--green .stat-value');
+  if (runsCard) {
+    runsCard.dataset.target = stats.total_runs ?? state.runs.length;
+  }
+  const successCard = document.querySelector('.stat-card--emerald .stat-value');
+  if (successCard) {
+    const totalRuns = stats.total_runs ?? state.runs.length;
+    const successRuns = stats.success_runs ?? 0;
+    const rate = totalRuns > 0 ? ((successRuns / totalRuns) * 100).toFixed(1) : '100.0';
+    successCard.dataset.target = rate;
+  }
+  const activeCard = document.querySelector('.stat-card--orange .stat-value');
+  if (activeCard) {
+    activeCard.dataset.target = stats.active_jobs ?? 0;
+  }
+  const failedTag = document.querySelector('.stat-card--orange .stat-tag.failed');
+  if (failedTag && stats.failed_runs !== undefined) {
+    failedTag.textContent = `${stats.failed_runs} failed`;
+  }
+  animateCounters();
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -750,10 +784,93 @@ window.openEditJob = function(jobId) {
   state.editingJobId = jobId;
   openJobModal();
   document.getElementById('jobModalTitle').textContent = `Edit Job: ${job.name}`;
-  // Populate fields
-  document.getElementById('jobName').value = job.name;
-  document.getElementById('jobDesc').value = job.desc;
-  document.getElementById('jobTags').value = job.tags.join(', ');
+
+  // Reset modal tabs to first tab (General)
+  document.querySelectorAll('.modal-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+  document.querySelectorAll('.modal-tab-pane').forEach((p, i) => p.classList.toggle('hidden', i !== 0));
+
+  // 1. General tab
+  document.getElementById('jobName').value = job.name || '';
+  document.getElementById('jobDesc').value = job.desc || job.description || '';
+  document.getElementById('jobTags').value = (job.tags || []).join(', ');
+
+  // 2. Trigger tab
+  const triggerType = job.trigger || 'cron';
+  document.querySelectorAll('#triggerSelector .trigger-sel-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.trigger === triggerType);
+  });
+  document.querySelectorAll('.trigger-config').forEach(c => c.classList.add('hidden'));
+  document.getElementById(`trigConfig-${triggerType}`)?.classList.remove('hidden');
+
+  const expr = job.triggerExpr || job.trigger_expr || '';
+  if (triggerType === 'cron') {
+    if (expr) document.getElementById('cronExpr').value = expr;
+    updateCronFields(expr || '0 2 * * *');
+  } else if (triggerType === 'interval') {
+    const match = expr.match(/(\d+)\s*([mhs])/i);
+    if (match) {
+      const val = parseInt(match[1]);
+      const unit = match[2].toLowerCase();
+      if (unit === 'h') {
+        document.getElementById('intHours').value = val;
+        document.getElementById('intMinutes').value = 0;
+        document.getElementById('intSeconds').value = 0;
+      } else if (unit === 'm') {
+        document.getElementById('intHours').value = 0;
+        document.getElementById('intMinutes').value = val;
+        document.getElementById('intSeconds').value = 0;
+      } else if (unit === 's') {
+        document.getElementById('intHours').value = 0;
+        document.getElementById('intMinutes').value = 0;
+        document.getElementById('intSeconds').value = val;
+      }
+    }
+  } else if (triggerType === 'oneshot') {
+    if (expr) document.getElementById('oneshotRunAt').value = expr;
+  }
+
+  // 3. Executor tab
+  const execType = job.executor || 'shell';
+  document.querySelectorAll('#executorSelector .trigger-sel-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.exec === execType);
+  });
+  document.querySelectorAll('.exec-config').forEach(c => c.classList.add('hidden'));
+  document.getElementById(`execConfig-${execType}`)?.classList.remove('hidden');
+
+  const cmd = job.command || '';
+  if (execType === 'shell') {
+    document.getElementById('shellCmd').value = cmd;
+    if (job.timeout_seconds) document.getElementById('shellTimeout').value = job.timeout_seconds;
+  } else if (execType === 'python') {
+    document.getElementById('pyCallable').value = cmd;
+  } else if (execType === 'http') {
+    if (cmd.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(cmd);
+        if (parsed.method) document.getElementById('httpMethod').value = parsed.method;
+        if (parsed.url) document.getElementById('httpUrl').value = parsed.url;
+        if (parsed.headers) document.getElementById('httpHeaders').value = JSON.stringify(parsed.headers, null, 2);
+        if (parsed.body) document.getElementById('httpBody').value = typeof parsed.body === 'string' ? parsed.body : JSON.stringify(parsed.body, null, 2);
+      } catch (e) {
+        document.getElementById('httpUrl').value = cmd;
+      }
+    } else {
+      const parts = cmd.split(' ', 2);
+      if (parts.length === 2 && ['GET','POST','PUT','DELETE','PATCH'].includes(parts[0].toUpperCase())) {
+        document.getElementById('httpMethod').value = parts[0].toUpperCase();
+        document.getElementById('httpUrl').value = parts[1];
+      } else {
+        document.getElementById('httpUrl').value = cmd;
+      }
+    }
+  } else if (execType === 'docker') {
+    document.getElementById('dockerCmd').value = cmd;
+  }
+
+  // 4. Retry settings
+  if (job.max_retries) document.getElementById('retryMaxAttempts').value = job.max_retries;
+  if (job.retry_delay_seconds) document.getElementById('retryBackoffBase').value = job.retry_delay_seconds;
+  updateRetryPreview();
 };
 
 window.openJobLogs = function(jobId) {
@@ -1438,6 +1555,49 @@ function closeJobModal() {
   document.getElementById('jobModal')?.classList.add('hidden');
 }
 
+function getCommandFromForm(executor) {
+  if (executor === 'shell') {
+    return document.getElementById('shellCmd')?.value?.trim() || "echo 'Hello from TaskForge'";
+  } else if (executor === 'python') {
+    return document.getElementById('pyCallable')?.value?.trim() || "print('TaskForge Python job')";
+  } else if (executor === 'http') {
+    const method = document.getElementById('httpMethod')?.value || 'GET';
+    const url = document.getElementById('httpUrl')?.value?.trim() || 'http://localhost:8080/health';
+    const headersStr = document.getElementById('httpHeaders')?.value?.trim();
+    const bodyStr = document.getElementById('httpBody')?.value?.trim();
+    if (headersStr || bodyStr) {
+      let headers = {};
+      let body = null;
+      try { if (headersStr) headers = JSON.parse(headersStr); } catch (_) {}
+      try { if (bodyStr) body = JSON.parse(bodyStr); } catch (_) { body = bodyStr; }
+      return JSON.stringify({ method, url, headers, body });
+    }
+    return `${method} ${url}`;
+  } else if (executor === 'docker') {
+    const img = document.getElementById('dockerImage')?.value?.trim() || 'alpine';
+    const dCmd = document.getElementById('dockerCmd')?.value?.trim() || 'echo hello';
+    return `${img} ${dCmd}`;
+  }
+  return "echo 'Hello from TaskForge'";
+}
+
+function getTriggerExprFromForm(trigger) {
+  if (trigger === 'cron') {
+    return document.getElementById('cronExpr')?.value?.trim() || '0 2 * * *';
+  } else if (trigger === 'interval') {
+    const h = parseInt(document.getElementById('intHours')?.value) || 0;
+    const m = parseInt(document.getElementById('intMinutes')?.value) || 0;
+    const s = parseInt(document.getElementById('intSeconds')?.value) || 0;
+    if (h > 0) return `every ${h}h`;
+    if (m > 0) return `every ${m}m`;
+    if (s > 0) return `every ${s}s`;
+    return 'every 30m';
+  } else if (trigger === 'oneshot') {
+    return document.getElementById('oneshotRunAt')?.value || new Date().toISOString();
+  }
+  return 'manual';
+}
+
 function saveJob() {
   const name = document.getElementById('jobName')?.value?.trim();
   if (!name) { toast('error', 'Validation Error', 'Job Name is required.'); return; }
@@ -1446,30 +1606,73 @@ function saveJob() {
   const executorBtn = document.querySelector('#executorSelector .trigger-sel-btn.active');
   const trigger = triggerBtn?.dataset.trigger || 'cron';
   const executor = executorBtn?.dataset.exec  || 'shell';
+  const command = getCommandFromForm(executor);
+  const triggerExpr = getTriggerExprFromForm(trigger);
+  const desc = document.getElementById('jobDesc')?.value || '';
+  const tags = (document.getElementById('jobTags')?.value || '').split(',').map(t=>t.trim()).filter(Boolean);
+  const timeout = parseInt(document.getElementById('shellTimeout')?.value) || 300;
+  const maxRetries = parseInt(document.getElementById('retryMaxAttempts')?.value) || 3;
+  const retryDelay = parseInt(document.getElementById('retryBackoffBase')?.value) || 5;
 
   if (state.editingJobId) {
     const job = state.jobs.find(j => j.id === state.editingJobId);
     if (job) {
-      job.name    = name;
-      job.desc    = document.getElementById('jobDesc')?.value || job.desc;
-      job.tags    = (document.getElementById('jobTags')?.value || '').split(',').map(t=>t.trim()).filter(Boolean);
+      job.name = name;
+      job.desc = desc;
+      job.description = desc;
+      job.tags = tags;
       job.trigger = trigger;
-      job.executor= executor;
+      job.triggerExpr = triggerExpr;
+      job.trigger_expr = triggerExpr;
+      job.executor = executor;
+      job.command = command;
+      job.timeout_seconds = timeout;
+      job.max_retries = maxRetries;
+      job.retry_delay_seconds = retryDelay;
+    }
+
+    if (state.liveApi) {
+      fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: state.editingJobId,
+          name: name,
+          description: desc,
+          trigger: trigger,
+          trigger_expr: triggerExpr,
+          executor: executor,
+          command: command,
+          status: job ? job.status : 'active',
+          tags: tags,
+          timeout_seconds: timeout,
+          max_retries: maxRetries,
+          retry_delay_seconds: retryDelay
+        })
+      })
+      .then(() => syncFromLiveApi())
+      .catch(e => console.error(e));
     }
     toast('success', 'Job Updated', `${name} has been updated.`);
   } else {
     const newJob = {
-      id:         `job-${Date.now()}`,
+      id: `job-${Date.now()}`,
       name,
-      desc:       document.getElementById('jobDesc')?.value || '',
+      desc,
+      description: desc,
       trigger,
-      triggerExpr: trigger === 'cron' ? (document.getElementById('cronExpr')?.value || '* * * * *') : `every ${document.getElementById('intMinutes')?.value||30}m`,
+      triggerExpr,
+      trigger_expr: triggerExpr,
       executor,
-      status:     'active',
-      tags:       (document.getElementById('jobTags')?.value||'').split(',').map(t=>t.trim()).filter(Boolean),
-      nextRun:    'Scheduled',
-      lastRun:    '—',
-      lastDuration: '—',
+      command,
+      status: 'active',
+      tags,
+      timeout_seconds: timeout,
+      max_retries: maxRetries,
+      retry_delay_seconds: retryDelay,
+      nextRun: 'Scheduled',
+      lastRun: 'Never',
+      lastDuration: '-',
       lastStatus: 'pending',
     };
     state.jobs.unshift(newJob);
@@ -1484,11 +1687,16 @@ function saveJob() {
           trigger: newJob.trigger,
           trigger_expr: newJob.triggerExpr,
           executor: newJob.executor,
-          command: "echo 'Executed " + newJob.name + "'",
+          command: newJob.command,
           status: newJob.status,
-          tags: newJob.tags
+          tags: newJob.tags,
+          timeout_seconds: timeout,
+          max_retries: maxRetries,
+          retry_delay_seconds: retryDelay
         })
-      }).then(() => syncFromLiveApi()).catch(e => console.error(e));
+      })
+      .then(() => syncFromLiveApi())
+      .catch(e => console.error(e));
     }
     toast('success', 'Job Created', `${name} has been created and is now scheduling.`);
   }
@@ -1496,7 +1704,8 @@ function saveJob() {
   closeJobModal();
   renderJobsTable();
   renderDashboardJobs();
-  document.getElementById('badge-jobs').textContent = state.jobs.length;
+  const badge = document.getElementById('badge-jobs');
+  if (badge) badge.textContent = state.jobs.length;
 }
 
 function updateRetryPreview() {

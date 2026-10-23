@@ -1,11 +1,9 @@
-import os
 from typing import Any
-from taskforge.plugins.base import BasePlugin
-from taskforge.core.logging import logger
+
 
 class PluginLoader:
     def __init__(self) -> None:
-        self.plugins: dict[str, BasePlugin] = {}
+        self.plugins: dict[str, dict[str, Any]] = {}
 
     def register_builtin_plugins(self) -> None:
         # Pre-register built-in catalog plugins
@@ -17,7 +15,7 @@ class PluginLoader:
                 "desc": "Run TaskForge jobs as Kubernetes Jobs. Supports resource limits, namespaces, service accounts, and pod tolerations.",
                 "type": "executor",
                 "icon": "⚓",
-                "enabled": True
+                "enabled": True,
             },
             {
                 "id": "discord_notifier",
@@ -26,7 +24,7 @@ class PluginLoader:
                 "desc": "Send rich embed notifications to Discord channels via webhooks. Configurable color, emoji, and mention support.",
                 "type": "notifier",
                 "icon": "💬",
-                "enabled": False
+                "enabled": False,
             },
             {
                 "id": "git_trigger",
@@ -35,7 +33,7 @@ class PluginLoader:
                 "desc": "Trigger jobs on GitHub/GitLab push, PR, tag, and release events. Validates webhook signatures automatically.",
                 "type": "trigger",
                 "icon": "🐙",
-                "enabled": True
+                "enabled": True,
             },
             {
                 "id": "datadog_metrics",
@@ -44,14 +42,15 @@ class PluginLoader:
                 "desc": "Export TaskForge metrics to Datadog. Supports custom tags, service checks, and event tracking.",
                 "type": "observability",
                 "icon": "📊",
-                "enabled": False
-            }
+                "enabled": False,
+            },
         ]
         for b in builtins:
             self.plugins[b["id"]] = b  # type: ignore
 
     def get_all(self) -> list[dict[str, Any]]:
         return list(self.plugins.values())
+
 
 plugin_loader = PluginLoader()
 plugin_loader.register_builtin_plugins()

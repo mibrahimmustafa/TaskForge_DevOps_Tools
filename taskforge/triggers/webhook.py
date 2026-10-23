@@ -1,5 +1,6 @@
 from taskforge.triggers.base import BaseTrigger
 
+
 class WebhookTrigger(BaseTrigger):
     def __init__(self, expr: str = "on POST") -> None:
         self.expr = expr

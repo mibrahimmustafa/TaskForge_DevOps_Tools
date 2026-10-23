@@ -1,5 +1,7 @@
 from apscheduler.triggers.cron import CronTrigger as ApCronTrigger
+
 from taskforge.triggers.base import BaseTrigger
+
 
 class CronTrigger(BaseTrigger):
     def __init__(self, expr: str) -> None:

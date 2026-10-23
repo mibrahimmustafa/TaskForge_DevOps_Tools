@@ -1,9 +1,10 @@
+from taskforge.jobs.models import TriggerType
 from taskforge.triggers.base import BaseTrigger
 from taskforge.triggers.cron import CronTrigger
 from taskforge.triggers.interval import IntervalTrigger
-from taskforge.triggers.webhook import WebhookTrigger
 from taskforge.triggers.oneshot import OneShotTrigger
-from taskforge.jobs.models import TriggerType
+from taskforge.triggers.webhook import WebhookTrigger
+
 
 def get_trigger(trigger_type: TriggerType, expr: str) -> BaseTrigger:
     if trigger_type == TriggerType.CRON:
@@ -16,11 +17,12 @@ def get_trigger(trigger_type: TriggerType, expr: str) -> BaseTrigger:
         return OneShotTrigger()
     return CronTrigger(expr)
 
+
 __all__ = [
     "BaseTrigger",
     "CronTrigger",
     "IntervalTrigger",
-    "WebhookTrigger",
     "OneShotTrigger",
+    "WebhookTrigger",
     "get_trigger",
 ]

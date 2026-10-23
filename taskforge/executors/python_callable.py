@@ -1,34 +1,38 @@
+import asyncio
 import io
-import sys
 import traceback
-from typing import Tuple
+from contextlib import redirect_stderr, redirect_stdout
+
 from taskforge.executors.base import BaseExecutor
 from taskforge.jobs.models import Job
 
+
 class PythonExecutor(BaseExecutor):
-    async def execute(self, job: Job) -> Tuple[int, str]:
-        cmd = job.command.strip()
+    @staticmethod
+    def _run_sync(cmd: str, job: Job) -> tuple[int, str]:
         stdout_buf = io.StringIO()
         stderr_buf = io.StringIO()
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-
         try:
-            sys.stdout = stdout_buf
-            sys.stderr = stderr_buf
-            # Execute python code
-            global_scope = {"job": job}
-            exec(cmd, global_scope)
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+            with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+                global_scope = {"job": job}
+                exec(cmd, global_scope)
             out = stdout_buf.getvalue()
             err = stderr_buf.getvalue()
             combined = out
             if err:
                 combined += f"\n[STDERR]\n{err}"
             return 0, combined or "[SUCCESS] Code executed with no stdout output."
-        except Exception as e:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+        except Exception:
             err_msg = traceback.format_exc()
             return 1, f"[PYTHON ERROR]\n{err_msg}"
+
+    async def execute(self, job: Job) -> tuple[int, str]:
+        cmd = job.command.strip()
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self._run_sync, cmd, job), timeout=float(job.timeout_seconds)
+            )
+        except TimeoutError:
+            return -1, f"[TIMEOUT] Python execution exceeded {job.timeout_seconds}s timeout."
+        except Exception as e:
+            return 1, f"[PYTHON ERROR] Execution failed: {e!s}"

@@ -1,11 +1,14 @@
 from fastapi import APIRouter, HTTPException
+
 from taskforge.plugins.loader import plugin_loader
 
 router = APIRouter(prefix="/plugins", tags=["Plugins"])
 
+
 @router.get("")
 async def list_plugins():
     return plugin_loader.get_all()
+
 
 @router.post("/{plugin_id}/toggle")
 async def toggle_plugin(plugin_id: str):

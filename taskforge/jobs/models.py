@@ -1,13 +1,20 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional, Any
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
 
 class JobStatus(str, Enum):
     ACTIVE = "active"
     PAUSED = "paused"
     RUNNING = "running"
     FAILED = "failed"
+
 
 class TriggerType(str, Enum):
     CRON = "cron"
@@ -16,11 +23,13 @@ class TriggerType(str, Enum):
     EVENT = "event"
     ONESHOT = "oneshot"
 
+
 class ExecutorType(str, Enum):
     SHELL = "shell"
     PYTHON = "python"
     HTTP = "http"
     DOCKER = "docker"
+
 
 class RunStatus(str, Enum):
     RUNNING = "running"
@@ -28,21 +37,21 @@ class RunStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+
 class JobRun(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
-    job_id: str = Field(alias="jobId", default="")
-    job_name: str = Field(alias="jobName", default="")
+    job_id: str = Field(default="", validation_alias="jobId")
+    job_name: str = Field(default="", validation_alias="jobName")
     status: RunStatus = RunStatus.RUNNING
-    started_at: datetime = Field(default_factory=datetime.utcnow)
-    finished_at: Optional[datetime] = None
+    started_at: datetime = Field(default_factory=utc_now)
+    finished_at: datetime | None = None
     duration_seconds: float = 0.0
     duration_str: str = "0s"
     trigger_type: str = "manual"
     exit_code: int = 0
     logs: str = ""
-
-    class Config:
-        populate_by_name = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,14 +60,19 @@ class JobRun(BaseModel):
             "jobName": self.job_name,
             "status": self.status.value,
             "started": self.started_at.strftime("%Y-%m-%d %H:%M:%S"),
-            "finished": self.finished_at.strftime("%Y-%m-%d %H:%M:%S") if self.finished_at else None,
+            "finished": self.finished_at.strftime("%Y-%m-%d %H:%M:%S")
+            if self.finished_at
+            else None,
             "duration": self.duration_str,
             "trigger": self.trigger_type,
             "exitCode": self.exit_code,
-            "logs": self.logs
+            "logs": self.logs,
         }
 
+
 class Job(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     name: str
     description: str = ""
@@ -71,15 +85,12 @@ class Job(BaseModel):
     timeout_seconds: int = 300
     max_retries: int = 3
     retry_delay_seconds: int = 5
-    webhook_secret: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    next_run: Optional[str] = None
-    last_run: Optional[str] = None
-    last_duration: Optional[str] = None
-    last_status: Optional[str] = None
-
-    class Config:
-        populate_by_name = True
+    webhook_secret: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    next_run: str | None = None
+    last_run: str | None = None
+    last_duration: str | None = None
+    last_status: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -100,6 +111,6 @@ class Job(BaseModel):
             "webhook_secret": self.webhook_secret,
             "nextRun": self.next_run or "Not scheduled",
             "lastRun": self.last_run or "Never",
-            "lastDuration": self.last_duration or "—",
-            "lastStatus": self.last_status or "—"
+            "lastDuration": self.last_duration or "-",
+            "lastStatus": self.last_status or "-",
         }

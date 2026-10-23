@@ -1,6 +1,9 @@
 from datetime import datetime
+
 from apscheduler.triggers.date import DateTrigger as ApDateTrigger
+
 from taskforge.triggers.base import BaseTrigger
+
 
 class OneShotTrigger(BaseTrigger):
     def __init__(self, run_at: datetime | None = None) -> None:

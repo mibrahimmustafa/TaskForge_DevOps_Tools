@@ -21,109 +21,175 @@ Requires-Dist: python-jose[cryptography]>=3.3.0
 Requires-Dist: passlib[bcrypt]>=1.7.4
 Requires-Dist: python-multipart>=0.0.9
 Requires-Dist: python-dotenv>=1.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Requires-Dist: ruff>=0.3.0; extra == "dev"
+Requires-Dist: mypy>=1.9.0; extra == "dev"
+Requires-Dist: bandit[toml]>=1.7.8; extra == "dev"
+Requires-Dist: httpx>=0.27.0; extra == "dev"
+Provides-Extra: postgres
+Requires-Dist: asyncpg>=0.29.0; extra == "postgres"
 
 # TaskForge 🔧
 
-> **Open-Source, Production-Grade DevOps Task Scheduler**
+> **Open-Source, Production-Grade DevOps Task Scheduler & Web Dashboard**
 >
-> Cron jobs, interval tasks, webhook triggers, event-driven pipelines, and more — all managed through a clean REST API and powerful CLI.
+> Cron jobs, interval tasks, webhook triggers, event-driven pipelines, streaming logs, and real-time execution monitoring — all managed through a sleek Web Dashboard, clean REST API, and powerful CLI.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg)](https://fastapi.tiangolo.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com)
+[![APScheduler](https://img.shields.io/badge/APScheduler-3.11-orange.svg)](https://github.com/agronholm/apscheduler)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
 ---
 
-## ✨ Features
+## 🖥️ Modern Web UI Dashboard
 
-| Feature | Description |
-|---------|-------------|
-| 🕐 **Cron Scheduling** | Full 5/6-field cron expressions with timezone support |
-| ⏱ **Interval Triggers** | Fixed intervals with optional random jitter |
-| 🎯 **One-Shot Jobs** | Fire at a specific datetime, then self-remove |
-| 🌐 **Webhook Triggers** | POST to an endpoint to fire a job instantly |
-| 🔗 **Event-Driven Pipelines** | Chain jobs via internal EventBus (DAG-style) |
-| 🐚 **Shell Executor** | Run any shell command with streaming logs |
-| 🐍 **Python Callable Executor** | Call any importable Python async function |
-| 🌍 **HTTP Executor** | POST/GET external REST endpoints |
-| 🐳 **Docker Executor** | Run jobs as ephemeral Docker containers |
-| 🔁 **Retry with Backoff** | Exponential backoff with jitter, configurable per-job |
-| 🔔 **Slack Notifications** | Rich Block Kit alerts on success/failure |
-| 📧 **Email Notifications** | HTML emails via SMTP/TLS |
-| 🪝 **Webhook Notifications** | HMAC-signed POST to any endpoint |
-| 🔌 **Plugin System** | Drop a folder in and extend anything |
-| 📊 **Prometheus Metrics** | Scrape `/metrics` with any Prometheus instance |
-| 🔐 **JWT Authentication** | Secure REST API with Bearer token auth |
-| 📖 **OpenAPI Docs** | Auto-generated Swagger UI at `/docs` |
-| 🐋 **Docker Ready** | Multi-stage Dockerfile + docker-compose |
+TaskForge comes equipped with a **single-page admin web dashboard (SPA)** served directly by the backend at `http://localhost:8080/`:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🔧 TASKFORGE                                          [☀ Light] [🔔] [👤 Admin] │
+├───────────────┬─────────────────────────────────────────────────────────────┤
+│ 📊 Dashboard  │  Total Jobs: 12   │  Active: 9   │  Failed: 1   │  Uptime: 99.9%  │
+│ 📋 Jobs       ├─────────────────────────────────────────────────────────────┤
+│ 📜 Live Logs  │  Job Runs Activity (Success vs Failed Chart)                │
+│ ⚡ Triggers    │  [████████████████████████████████████████████████]         │
+│ 🔔 Alerts     ├─────────────────────────────────────────────────────────────┤
+│ 📈 Metrics    │  Recent Jobs:                                               │
+│ 🔌 Plugins    │  • daily-db-backup    [cron: 0 2 * * *]    [SUCCESS]  [▶] [✏]  │
+│ 🛡️ Health     │  • cache-invalidation [every 30m]          [RUNNING]  [▶] [✏]  │
+│ ⚙️ Settings   │  • health-check-prod  [every 5m]           [SUCCESS]  [▶] [✏]  │
+└───────────────┴─────────────────────────────────────────────────────────────┘
+```
+
+### Dashboard Highlights:
+- **9 Dedicated Views**: Dashboard Overview, Jobs Management, Live Execution Logs, Triggers, Notifications, Metrics / Observability, System Health, Plugins Catalog, and System Settings.
+- **Instant Interactive Control**: Trigger executions on-demand (`▶`), Pause/Resume schedules (`⏸`/`↺`), inspect live streaming logs (`📋`), and edit configs (`✏`).
+- **Visual Analytics**: Interactive 7-day success/failure bar charts and donut charts powered by Chart.js.
+- **Theme & Personalization**: Smooth dark / light mode toggle with 5 custom accent color palettes (Blue, Emerald, Purple, Amber, Red).
+- **Dual Mode Operation**: Connects live to the TaskForge backend API with automatic fallback to standalone demo mode.
 
 ---
 
-## 📦 Installation
+## ✨ System Features
 
-### From PyPI (coming soon)
-
-```bash
-pip install taskforge
-# With optional extras:
-pip install "taskforge[api,postgres,slack,metrics]"
-```
-
-### From Source
-
-```bash
-git clone https://github.com/your-org/taskforge.git
-cd taskforge
-pip install -e ".[dev,api,postgres,slack,metrics]"
-```
+| Feature | Description |
+|---------|-------------|
+| 🖥️ **Web Dashboard UI** | Full-featured SPA admin console served directly out of the box |
+| 🕐 **Cron Scheduling** | Full 5/6-field standard cron expressions with timezone support |
+| ⏱ **Interval Triggers** | Flexible intervals (`every 30m`, `every 1h`, `every 5s`) with jitter |
+| 🎯 **One-Shot Jobs** | Fire once at a specific datetime and self-archive |
+| 🌐 **Webhook Triggers** | Trigger jobs securely via incoming HTTP POST requests with secret verification |
+| 🔗 **Event-Driven Pub/Sub** | Decoupled event bus (`job.started`, `job.success`, `job.failed`) |
+| 🐚 **Shell Executor** | Execute CLI/shell commands with real-time stdout/stderr capture |
+| 🐍 **Python Callable Executor** | Run dynamic Python code snippets and callables safely |
+| 🌍 **HTTP Executor** | Invoke external REST endpoints with custom payloads and methods |
+| 🐳 **Docker Executor** | Run jobs inside ephemeral Docker containers (`docker run`) |
+| 🔁 **Smart Retry Policies** | Configurable retries with exponential backoff and jitter |
+| 🔌 **Plugin Architecture** | Modular extensions (K8s executor, Discord alerts, Git triggers) |
+| 📊 **Prometheus Metrics** | Scrape-ready Prometheus exposition at `/metrics` |
+| 📖 **OpenAPI / Swagger** | Interactive API documentation at `/docs` |
+| 💾 **Backend Storage** | Async SQLite (`aiosqlite`) default with PostgreSQL roadmap |
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Start the server
+### 1. Clone & Set Up Environment
 
 ```bash
-# Using SQLite (default — great for development)
+git clone https://github.com/mibrahimmustafa/TaskForge_DevOps_Tools.git
+cd TaskForge_DevOps_Tools
+
+# Create and activate virtual environment
+python -m venv .venv
+
+# On Windows PowerShell:
+.venv\Scripts\Activate.ps1
+
+# On Linux/macOS:
+source .venv/bin/activate
+```
+
+### 2. Install Dependencies
+
+```bash
+# Install core dependencies
+pip install fastapi "uvicorn[standard]" apscheduler pydantic \
+  sqlalchemy aiosqlite httpx typer rich structlog \
+  prometheus-client "python-jose[cryptography]" \
+  "passlib[bcrypt]" python-multipart python-dotenv
+
+# Install TaskForge in editable mode (registers the 'taskforge' CLI):
+pip install -e .
+```
+
+### 3. Configure
+
+```bash
+# Copy default environment settings
+cp .env.example .env
+```
+
+### 4. Start the Server & Web Dashboard
+
+```bash
+# Using the TaskForge CLI:
 taskforge server start
 
-# With PostgreSQL
-TASKFORGE_STORAGE_URL="postgresql+asyncpg://user:pass@localhost/taskforge" \
-taskforge server start --port 8080
+# Or directly with Uvicorn:
+uvicorn taskforge.api.app:create_app --factory --host 0.0.0.0 --port 8080 --reload
 ```
 
-Open the API docs at: **http://localhost:8080/docs**
+Open your browser to:
+- 🌐 **Dashboard UI**: [http://localhost:8080/](http://localhost:8080/)
+- 📖 **Interactive API Docs (Swagger)**: [http://localhost:8080/docs](http://localhost:8080/docs)
+- 📊 **Prometheus Metrics**: [http://localhost:8080/metrics](http://localhost:8080/metrics)
+- 🩺 **Health Check**: [http://localhost:8080/health](http://localhost:8080/health)
 
-### 2. Create your first job
+---
+
+## 💻 CLI Commands
 
 ```bash
-# Via CLI from a JSON file
+# Check version
+taskforge version
+
+# Start server
+taskforge server start --port 8080
+
+# List configured jobs
+taskforge jobs list
+
+# Create a job from JSON definition
 taskforge jobs create examples/hello_world_job.json
 
-# Via API
-curl -X POST http://localhost:8080/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d @examples/hello_world_job.json
+# Run a job immediately
+taskforge jobs run job-hello-world
 ```
 
-### 3. Manage jobs
+---
 
-```bash
-taskforge jobs list              # list all jobs
-taskforge jobs get <job-id>      # show job details
-taskforge jobs run <job-id>      # trigger immediately
-taskforge jobs pause <job-id>    # pause scheduling
-taskforge jobs resume <job-id>   # resume scheduling
-taskforge jobs delete <job-id>   # delete permanently
-```
+## 📋 Example Job Definition
 
-### 4. View logs
-
-```bash
-taskforge logs runs <job-id>     # list run history
-taskforge logs show <run-id>     # show run logs
-taskforge logs tail <run-id>     # tail live logs
+```json
+{
+  "id": "job-hello-world",
+  "name": "hello-world",
+  "description": "Simple hello world demonstration job",
+  "trigger": "interval",
+  "trigger_expr": "every 1m",
+  "executor": "shell",
+  "command": "echo 'Hello from TaskForge!'",
+  "status": "active",
+  "tags": ["demo", "getting-started"],
+  "timeout_seconds": 300,
+  "max_retries": 3,
+  "retry_delay_seconds": 5
+}
 ```
 
 ---
@@ -131,259 +197,80 @@ taskforge logs tail <run-id>     # tail live logs
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLIENT LAYER                          │
-│            REST API (FastAPI)  │  CLI (Typer + Rich)         │
-└──────────────┬──────────────────────────────┬───────────────┘
-               │                              │
-┌──────────────▼──────────────────────────────▼───────────────┐
-│                       CORE ENGINE                            │
-│   Scheduler (APScheduler)  │  EventBus  │  Pipeline (DAG)   │
-└──────┬─────────────────────────────────────────┬────────────┘
-       │                                         │
-┌──────▼──────┐  ┌────────────┐  ┌──────────────▼────────────┐
-│  TRIGGERS   │  │  EXECUTORS │  │    NOTIFICATIONS           │
-│  Cron       │  │  Shell     │  │  Slack / Email / Webhook   │
-│  Interval   │  │  Python    │  └───────────────────────────┘
-│  Webhook    │  │  HTTP      │
-│  OneShot    │  │  Docker    │
-│  EventBus   │  └────────────┘
-└─────────────┘
-       │
-┌──────▼──────────────────────────────────────────────────────┐
-│                     STORAGE LAYER                            │
-│          SQLite (default)  │  PostgreSQL                     │
-└─────────────────────────────────────────────────────────────┘
-       │
-┌──────▼──────────────────────────────────────────────────────┐
-│                     PLUGIN SYSTEM                            │
-│  Entry-point discovery │  Folder scan  │  Lifecycle hooks    │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                               CLIENT INTERFACES                             │
+│       Web Dashboard (SPA)   │   REST API (FastAPI)   │   CLI (Typer+Rich)   │
+└──────────────────────┬──────────────────────┬───────────────────────┬───────┘
+                       │                      │                       │
+┌──────────────────────▼──────────────────────▼───────────────────────▼───────┐
+│                              TASKFORGE CORE ENGINE                          │
+│     Async Scheduler (APScheduler)   │   EventBus   │   Metrics Exporter     │
+└──────────────┬──────────────────────────────────────────────┬───────────────┘
+               │                                              │
+┌──────────────▼─────────────┐                  ┌─────────────▼───────────────┐
+│          TRIGGERS          │                  │          EXECUTORS          │
+│ • CronTrigger (Crontab)    │                  │ • ShellExecutor             │
+│ • IntervalTrigger (Timer)  │                  │ • PythonCallableExecutor    │
+│ • WebhookTrigger (HTTP)    │                  │ • HTTPExecutor (httpx)      │
+│ • OneShotTrigger (Date)    │                  │ • DockerExecutor (CLI)      │
+└──────────────┬─────────────┘                  └─────────────┬───────────────┘
+               │                                              │
+┌──────────────▼──────────────────────────────────────────────▼───────────────┐
+│                               STORAGE LAYER                                 │
+│               SQLiteStorage (aiosqlite)  │  PostgreSQL (asyncpg)            │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-See [`architecture.json`](./architecture.json) for the full structured definition.
+See [`architecture.json`](./architecture.json) for the machine-readable architectural specification.
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Configuration Variables
 
-All configuration is via environment variables (12-factor app pattern).
+All configuration is handled via environment variables (12-factor pattern):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TASKFORGE_STORAGE_URL` | `sqlite+aiosqlite:///taskforge.db` | Database URL |
-| `TASKFORGE_SECRET_KEY` | *(required in prod)* | JWT signing secret |
-| `TASKFORGE_LOG_LEVEL` | `info` | Log level (`debug/info/warning/error`) |
-| `TASKFORGE_METRICS_ENABLED` | `true` | Enable Prometheus metrics |
-| `TASKFORGE_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
-| `TASKFORGE_SLACK_BOT_TOKEN` | *(optional)* | Slack bot OAuth token |
-| `TASKFORGE_SLACK_DEFAULT_CHANNEL` | `#alerts` | Default Slack channel |
-| `TASKFORGE_SMTP_HOST` | *(optional)* | SMTP server hostname |
-| `TASKFORGE_SMTP_PORT` | `587` | SMTP port |
-| `TASKFORGE_SMTP_USER` | *(optional)* | SMTP username |
-| `TASKFORGE_SMTP_PASSWORD` | *(optional)* | SMTP password |
-
-Copy `.env.example` to `.env` to get started.
-
----
-
-## 📋 Job Definition Reference
-
-```json
-{
-  "name": "my-job",
-  "description": "What this job does",
-  "tags": ["production", "database"],
-  "trigger": {
-    "type": "cron",
-    "config": {
-      "expression": "0 2 * * *",
-      "timezone": "UTC"
-    }
-  },
-  "executor": {
-    "type": "shell",
-    "config": {
-      "command": "/opt/scripts/run.sh",
-      "timeout_seconds": 3600,
-      "env": { "KEY": "value" }
-    }
-  },
-  "retry_policy": {
-    "max_attempts": 3,
-    "backoff_base": 30,
-    "backoff_factor": 2.0,
-    "jitter": true
-  },
-  "notifications": [
-    {
-      "channel": "slack",
-      "on_events": ["job.failed"],
-      "config": { "channel": "#ops-alerts" }
-    }
-  ]
-}
-```
-
-### Trigger Types
-
-| Type | Config Keys |
-|------|-------------|
-| `cron` | `expression` (cron string), `timezone` |
-| `interval` | `weeks`, `days`, `hours`, `minutes`, `seconds`, `jitter` |
-| `oneshot` | `run_at` (ISO-8601 datetime) |
-| `webhook` | `secret` (HMAC key), `allowed_ips` (CIDR list) |
-| `event` | `event_name`, `filter_job_id`, `filter_status` |
-
-### Executor Types
-
-| Type | Config Keys |
-|------|-------------|
-| `shell` | `command`, `timeout_seconds`, `env`, `working_dir` |
-| `python_callable` | `callable` (dotted.module:function), `kwargs` |
-| `http` | `url`, `method`, `headers`, `body`, `expected_status` |
-| `docker` | `image`, `command`, `env`, `volumes`, `timeout_seconds` |
-
----
-
-## 🐳 Docker Deployment
-
-```bash
-# Development (SQLite + pgAdmin)
-docker compose -f docker/docker-compose.yml --profile dev up
-
-# Production (PostgreSQL + app)
-docker compose -f docker/docker-compose.yml up -d taskforge postgres
-
-# With monitoring (Prometheus + Grafana)
-docker compose -f docker/docker-compose.yml --profile monitoring up -d
-```
-
----
-
-## 🔌 Writing a Plugin
-
-1. Copy the template:
-   ```bash
-   cp -r plugins/PLUGIN_TEMPLATE plugins/my_plugin
-   ```
-
-2. Edit `plugins/my_plugin/__init__.py`:
-   ```python
-   from taskforge.plugins.base import BasePlugin, HookContext
-
-   class MyPlugin(BasePlugin):
-       name = "my_plugin"
-       version = "0.1.0"
-
-       async def on_job_end(self, ctx: HookContext) -> None:
-           print(f"Job {ctx.job_id} finished with status {ctx.status}")
-
-   plugin = MyPlugin
-   ```
-
-3. Register in `pyproject.toml`:
-   ```toml
-   [project.entry-points."taskforge.plugins"]
-   my_plugin = "plugins.my_plugin:plugin"
-   ```
-
-4. Install and restart — TaskForge discovers it automatically.
-
----
-
-## 🧪 Testing
-
-```bash
-# Install dev dependencies
-pip install -e ".[dev]"
-
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=taskforge --cov-report=html
-
-# Run only unit tests
-pytest tests/unit/
-
-# Run only integration tests
-pytest tests/integration/
-
-# Run only e2e tests
-pytest tests/e2e/
-```
+| `TASKFORGE_STORAGE_URL` | `sqlite+aiosqlite:///taskforge.db` | Async DB connection URL |
+| `TASKFORGE_SECRET_KEY` | *(auto-generated)* | Secret key for tokens & sessions |
+| `TASKFORGE_LOG_LEVEL` | `info` | Logging verbosity (`debug`, `info`, `warning`, `error`) |
+| `TASKFORGE_METRICS_ENABLED` | `true` | Expose Prometheus metrics at `/metrics` |
+| `TASKFORGE_HOST` | `0.0.0.0` | Server bind address |
+| `TASKFORGE_PORT` | `8080` | Server listen port |
+| `TASKFORGE_CORS_ORIGINS` | `*` | Allowed CORS origins for the API |
 
 ---
 
 ## 📂 Project Structure
 
 ```
-taskforge/
+TaskForge_DevOps_Tools/
+├── dashboard/              # Single-page web dashboard (HTML5, CSS3, Vanilla JS)
+│   ├── index.html          # Main SPA layout with 9 view panels
+│   ├── styles.css          # Design tokens, themes (dark/light), animations
+│   └── app.js              # State management, Chart.js, live API integration
 ├── taskforge/              # Core Python package
-│   ├── core/               # Scheduler, EventBus, Pipeline, logging, metrics
-│   ├── jobs/               # Job/Run models, retry logic, log stream
-│   ├── triggers/           # Cron, Interval, OneShot, Webhook, Event triggers
-│   ├── executors/          # Shell, Python, HTTP, Docker executors
-│   ├── plugins/            # Plugin loader and base class
-│   ├── storage/            # SQLite and PostgreSQL backends
-│   ├── api/                # FastAPI REST API (routers, middleware)
-│   ├── notifications/      # Slack, Email, Webhook notifiers
-│   ├── cli/                # Typer CLI (jobs, logs, server commands)
-│   └── config.py           # Pydantic Settings (env-based config)
-├── plugins/                # Drop-in community plugins
-│   ├── PLUGIN_TEMPLATE/    # Copy this to create a new plugin
-│   ├── k8s_executor/       # Kubernetes Job executor
-│   ├── discord_notifier/   # Discord webhook notifications
-│   └── git_trigger/        # GitHub/GitLab push trigger
-├── tests/
-│   ├── unit/               # Unit tests (triggers, models, log stream)
-│   ├── integration/        # Integration tests (storage backend)
-│   └── e2e/                # End-to-end API tests
-├── examples/               # Example job definitions (JSON)
-├── docker/                 # Dockerfile, docker-compose, prometheus config
-├── .github/workflows/      # GitHub Actions CI/CD
-├── pyproject.toml          # PEP 517/518 build, dependencies, tools
-├── .env.example            # Environment variable template
-├── architecture.json       # Structured architecture definition
-└── README.md               # This file
+│   ├── core/               # Scheduler engine, event bus, config, metrics, logging
+│   ├── jobs/               # Job & JobRun models, retry strategy
+│   ├── triggers/           # Cron, Interval, Webhook, OneShot triggers
+│   ├── executors/          # Shell, Python, HTTP, Docker execution engines
+│   ├── storage/            # Async SQLite storage backend
+│   ├── api/                # FastAPI application, routers (jobs, runs, system, plugins)
+│   ├── plugins/            # Extensibility plugin loader & base classes
+│   ├── notifications/      # Alert notification interfaces
+│   └── cli/                # Rich Typer CLI commands
+├── examples/               # Example job configurations (JSON)
+│   └── hello_world_job.json
+├── docker/                 # Container configs (Dockerfile, compose, prometheus)
+├── .github/workflows/      # CI/CD automation pipelines
+├── pyproject.toml          # Package metadata & dependencies
+├── architecture.json       # System architecture definition
+├── install-steps.txt       # Step-by-step setup guide for Windows PowerShell
+└── README.md               # Project documentation
 ```
-
----
-
-## 🛡️ Security
-
-- All API endpoints require JWT Bearer token authentication
-- Webhook triggers support HMAC-SHA256 signature verification
-- Non-root Docker container user
-- Secrets are never logged (masked in `taskforge server config`)
-- CORS origins are configurable
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/my-feature`
-3. Make changes with tests
-4. Run: `pre-commit run --all-files && pytest`
-5. Open a Pull Request
-
-Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for full guidelines.
 
 ---
 
 ## 📄 License
 
-MIT — see [LICENSE](./LICENSE) for details.
-
----
-
-## 🙏 Acknowledgements
-
-Built on the shoulders of these excellent open-source projects:
-- [APScheduler](https://github.com/agronholm/apscheduler) — scheduling engine
-- [FastAPI](https://fastapi.tiangolo.com) — REST API framework
-- [Pydantic](https://docs.pydantic.dev) — data validation
-- [SQLAlchemy](https://www.sqlalchemy.org) — async ORM
-- [Typer](https://typer.tiangolo.com) + [Rich](https://rich.readthedocs.io) — CLI
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.

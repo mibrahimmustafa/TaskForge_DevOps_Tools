@@ -1,9 +1,10 @@
 from taskforge.executors.base import BaseExecutor
-from taskforge.executors.shell import ShellExecutor
+from taskforge.executors.docker import DockerExecutor
 from taskforge.executors.http import HTTPExecutor
 from taskforge.executors.python_callable import PythonExecutor
-from taskforge.executors.docker import DockerExecutor
+from taskforge.executors.shell import ShellExecutor
 from taskforge.jobs.models import ExecutorType
+
 
 def get_executor(executor_type: ExecutorType) -> BaseExecutor:
     if executor_type == ExecutorType.SHELL:
@@ -16,11 +17,12 @@ def get_executor(executor_type: ExecutorType) -> BaseExecutor:
         return DockerExecutor()
     return ShellExecutor()
 
+
 __all__ = [
     "BaseExecutor",
-    "ShellExecutor",
+    "DockerExecutor",
     "HTTPExecutor",
     "PythonExecutor",
-    "DockerExecutor",
+    "ShellExecutor",
     "get_executor",
 ]

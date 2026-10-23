@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+
 from taskforge.jobs.models import Job, JobRun
+
 
 class StorageBackend(ABC):
     @abstractmethod
@@ -12,7 +13,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_job(self, job_id: str) -> Optional[Job]:
+    async def get_job(self, job_id: str) -> Job | None:
         pass
 
     @abstractmethod
@@ -28,7 +29,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_run(self, run_id: str) -> Optional[JobRun]:
+    async def get_run(self, run_id: str) -> JobRun | None:
         pass
 
     @abstractmethod

@@ -1,3 +1,3 @@
-from taskforge.jobs.models import Job, JobRun, JobStatus, TriggerType, ExecutorType, RunStatus
+from taskforge.jobs.models import ExecutorType, Job, JobRun, JobStatus, RunStatus, TriggerType
 
-__all__ = ["Job", "JobRun", "JobStatus", "TriggerType", "ExecutorType", "RunStatus"]
+__all__ = ["ExecutorType", "Job", "JobRun", "JobStatus", "RunStatus", "TriggerType"]

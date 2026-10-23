@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+
 from taskforge.jobs.models import Job, JobRun
+
 
 class BaseNotifier(ABC):
     @abstractmethod

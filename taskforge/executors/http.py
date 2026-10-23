@@ -1,11 +1,13 @@
 import json
-from typing import Tuple
+
 import httpx
+
 from taskforge.executors.base import BaseExecutor
 from taskforge.jobs.models import Job
 
+
 class HTTPExecutor(BaseExecutor):
-    async def execute(self, job: Job) -> Tuple[int, str]:
+    async def execute(self, job: Job) -> tuple[int, str]:
         # format can be: METHOD URL or just URL or JSON configuration
         cmd = job.command.strip()
         method = "GET"
@@ -35,4 +37,4 @@ class HTTPExecutor(BaseExecutor):
                 exit_code = 0 if resp.is_success else 1
                 return exit_code, log
         except Exception as e:
-            return 1, f"[HTTP ERROR] Request failed: {str(e)}"
+            return 1, f"[HTTP ERROR] Request failed: {e!s}"

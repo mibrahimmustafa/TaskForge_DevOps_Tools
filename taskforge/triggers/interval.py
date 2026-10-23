@@ -1,6 +1,9 @@
 import re
+
 from apscheduler.triggers.interval import IntervalTrigger as ApIntervalTrigger
+
 from taskforge.triggers.base import BaseTrigger
+
 
 class IntervalTrigger(BaseTrigger):
     def __init__(self, expr: str) -> None:

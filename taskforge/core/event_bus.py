@@ -1,6 +1,9 @@
 import asyncio
-from typing import Callable, Any
+from collections.abc import Callable
+from typing import Any
+
 from taskforge.core.logging import logger
+
 
 class EventBus:
     def __init__(self) -> None:
@@ -13,7 +16,9 @@ class EventBus:
 
     def unsubscribe(self, event_name: str, callback: Callable[..., Any]) -> None:
         if event_name in self._subscribers:
-            self._subscribers[event_name] = [cb for cb in self._subscribers[event_name] if cb != callback]
+            self._subscribers[event_name] = [
+                cb for cb in self._subscribers[event_name] if cb != callback
+            ]
 
     async def emit(self, event_name: str, **payload: Any) -> None:
         callbacks = self._subscribers.get(event_name, []) + self._subscribers.get("*", [])
@@ -25,5 +30,6 @@ class EventBus:
                     cb(event_name=event_name, **payload)
             except Exception as e:
                 logger.error("event_bus_callback_failed", event=event_name, error=str(e))
+
 
 event_bus = EventBus()

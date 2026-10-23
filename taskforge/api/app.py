@@ -1,15 +1,17 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from taskforge.api.routers import jobs, runs, triggers, system, plugins
+from taskforge.api.routers import jobs, plugins, runs, system, triggers
 from taskforge.core.config import get_settings
-from taskforge.core.logging import setup_logging, logger
+from taskforge.core.logging import logger, setup_logging
 from taskforge.core.scheduler import TaskScheduler
 from taskforge.storage.sqlite_backend import SQLiteStorage
+
 
 def create_app() -> FastAPI:
     settings = get_settings()
@@ -31,7 +33,7 @@ def create_app() -> FastAPI:
         title="TaskForge API",
         version=settings.app_version,
         description="DevOps Task Scheduler REST API & Management Engine",
-        lifespan=lifespan
+        lifespan=lifespan,
     )
 
     # CORS
@@ -53,7 +55,9 @@ def create_app() -> FastAPI:
     # Static Dashboard
     dashboard_dir = Path(__file__).resolve().parent.parent.parent / "dashboard"
     if dashboard_dir.exists():
-        app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard")
+        app.mount(
+            "/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard"
+        )
 
         @app.get("/", include_in_schema=False)
         async def root_redirect():

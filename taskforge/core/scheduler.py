@@ -1,18 +1,17 @@
-import asyncio
 import time
 import uuid
-from datetime import datetime
-from typing import Optional
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from taskforge.core.event_bus import event_bus
 from taskforge.core.logging import logger
-from taskforge.core.metrics import JOB_RUNS_TOTAL, JOB_RUN_DURATION, ACTIVE_JOBS_GAUGE
+from taskforge.core.metrics import ACTIVE_JOBS_GAUGE, JOB_RUN_DURATION, JOB_RUNS_TOTAL
 from taskforge.executors import get_executor
-from taskforge.jobs.models import Job, JobRun, JobStatus, RunStatus, TriggerType
+from taskforge.jobs.models import ExecutorType, Job, JobRun, JobStatus, RunStatus, TriggerType
 from taskforge.storage.base import StorageBackend
 from taskforge.triggers import get_trigger
+
 
 class TaskScheduler:
     def __init__(self, storage: StorageBackend) -> None:
@@ -63,7 +62,7 @@ class TaskScheduler:
                 id=job.id,
                 name=job.name,
                 kwargs={"job_id": job.id, "trigger_type": job.trigger.value},
-                replace_existing=True
+                replace_existing=True,
             )
             # Update next_run preview
             aps_job = self.scheduler.get_job(job.id)
@@ -81,8 +80,8 @@ class TaskScheduler:
             job_id=job.id,
             job_name=job.name,
             status=RunStatus.RUNNING,
-            started_at=datetime.utcnow(),
-            trigger_type=trigger_type
+            started_at=datetime.now(UTC),
+            trigger_type=trigger_type,
         )
         await self.storage.save_run(run)
 
@@ -98,9 +97,11 @@ class TaskScheduler:
         exit_code, output_logs = await executor.execute(job)
 
         elapsed = time.time() - start_time
-        duration_str = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+        duration_str = (
+            f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+        )
 
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(UTC)
         run.duration_seconds = elapsed
         run.duration_str = duration_str
         run.exit_code = exit_code
@@ -134,7 +135,7 @@ class TaskScheduler:
             job_id=job.id,
             status=run.status.value,
             duration=duration_str,
-            exit_code=exit_code
+            exit_code=exit_code,
         )
         return run
 
@@ -157,7 +158,7 @@ class TaskScheduler:
         ACTIVE_JOBS_GAUGE.set(sum(1 for j in jobs if j.status == JobStatus.ACTIVE))
         return deleted
 
-    async def pause_job(self, job_id: str) -> Optional[Job]:
+    async def pause_job(self, job_id: str) -> Job | None:
         job = await self.storage.get_job(job_id)
         if not job:
             return None
@@ -167,7 +168,7 @@ class TaskScheduler:
         await self.storage.save_job(job)
         return job
 
-    async def resume_job(self, job_id: str) -> Optional[Job]:
+    async def resume_job(self, job_id: str) -> Job | None:
         job = await self.storage.get_job(job_id)
         if not job:
             return None
@@ -187,7 +188,7 @@ class TaskScheduler:
                 executor=ExecutorType.SHELL,
                 command="echo '[BACKUP] Running PostgreSQL database dump... SUCCESS. Uploaded 2.4GB to s3://backups/'",
                 status=JobStatus.ACTIVE,
-                tags=["production", "database"]
+                tags=["production", "database"],
             ),
             Job(
                 id="job-002",
@@ -198,7 +199,7 @@ class TaskScheduler:
                 executor=ExecutorType.PYTHON,
                 command="print('[REDIS] Cache purged: 14,203 keys invalidated successfully.')",
                 status=JobStatus.ACTIVE,
-                tags=["production"]
+                tags=["production"],
             ),
             Job(
                 id="job-003",
@@ -209,7 +210,7 @@ class TaskScheduler:
                 executor=ExecutorType.SHELL,
                 command="echo 'ALL SYSTEMS OPERATIONAL. Latency 14ms.'",
                 status=JobStatus.ACTIVE,
-                tags=["monitoring", "prod"]
+                tags=["monitoring", "prod"],
             ),
             Job(
                 id="job-004",
@@ -220,8 +221,8 @@ class TaskScheduler:
                 executor=ExecutorType.SHELL,
                 command="echo '[CLEANUP] Deleted 1,280 expired job execution records.'",
                 status=JobStatus.ACTIVE,
-                tags=["maintenance"]
-            )
+                tags=["maintenance"],
+            ),
         ]
         for j in defaults:
             await self.storage.save_job(j)
