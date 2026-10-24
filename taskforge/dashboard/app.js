@@ -82,6 +82,7 @@ async function action(path,body,success='Request accepted'){
 }
 
 function signOut(){
+  sessionStorage.removeItem('taskforge-token');
   state.token='';
   state.session=null;
   $('access-token').value='';
@@ -98,6 +99,7 @@ $('login-form').addEventListener('submit',async event=>{
   state.token=$('access-token').value.trim();
   try{
     state.session=await api('/session');
+    sessionStorage.setItem('taskforge-token',state.token);
     $('access-token').value='';
     $('login').hidden=true;
     $('workspace').hidden=false;
@@ -108,10 +110,29 @@ $('login-form').addEventListener('submit',async event=>{
   }catch(error){
     $('login-error').textContent=error.message;
     state.token='';
+    sessionStorage.removeItem('taskforge-token');
   }finally{
     $('connect').disabled=false;
   }
 });
+
+async function initSession(){
+  const savedToken=sessionStorage.getItem('taskforge-token');
+  if(!savedToken)return;
+  state.token=savedToken;
+  try{
+    state.session=await api('/session');
+    $('login').hidden=true;
+    $('workspace').hidden=false;
+    $('identity').textContent=state.session.name+' · '+state.session.role;
+    buildNavigation();
+    navigate(location.hash.slice(1)||'overview');
+    await refresh();
+  }catch(_){
+    signOut();
+  }
+}
+initSession();
 
 $('logout').addEventListener('click',signOut);
 $('refresh').addEventListener('click',()=>refresh(true));
