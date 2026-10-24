@@ -8,13 +8,14 @@ It supports **artifact-only pipelines, Docker deployment, and Kubernetes deploym
 
 - Manual, cron, interval, one-shot, signed GitHub push, and secret-protected webhook triggers.
 - Versioned job and pipeline definitions, immutable run snapshots, dependency validation, parallel independent steps, and verified artifact handoff to dependent steps.
+- Standard CI/CD runner environment variables (`CI=true`, `TASKFORGE_PROJECT`, `TASKFORGE_RUN_ID`, `TASKFORGE_STEP`, `TASKFORGE_WORKSPACE`, `TASKFORGE_COMMIT`) and dynamic runtime parameters.
 - Atomic queue claims, unique execution fences, worker heartbeats, resource locks, timeout/cancellation cleanup, durable standalone-job retries, and persisted attempts.
 - Docker, HTTP, Python, and shell executors. Host execution is disabled by default.
 - Project-scoped viewer/operator/admin bearer tokens; protected logs and artifacts; audit records; secret reference injection and log redaction.
-- Content-addressed local artifacts with SHA-256 and a 50 MiB limit per file.
+- Content-addressed local artifacts with SHA-256 and a 50 MiB limit per file, with authenticated in-modal text preview for logs and manifests.
 - Docker and Kubernetes adapters with immutable image validation, environment serialization, approvals, stale-build prevention, explicit rollback, and recovery reconciliation.
 - Transactional notification queue with up to five HTTP delivery attempts and an idempotency key.
-- Responsive dark/light dashboard: overview, jobs, pipelines, run history, deployments, integrations, and audit. It displays persisted data and clear errors.
+- Responsive dark/light dashboard: visual DAG workflow graphs, overview pulse, jobs, pipelines, run history with live streaming terminal and copy controls, deployments, integrations, and audit. Displays real persisted data and clear errors.
 - GitHub Actions quality checks, Windows/Linux test matrix, PostgreSQL integration, Chromium UI tests, container smoke testing, and gated tag releases to GHCR.
 
 This release is intended for trusted teams. It is not a hostile-code multi-tenant sandbox. Shell/Python can access their runner's host; Docker access also grants substantial control of the host. Keep execution workers separate from the API and isolate runners by trust boundary.
@@ -162,6 +163,7 @@ Interactive API schemas are at `/docs`. Supply `Authorization: Bearer <token>` f
 | `GET /api/runs/{id}/logs?after=0` | Cursor-based logs |
 | `GET /api/runs/{id}/attempts` | Persisted attempt records |
 | `GET /api/runs/{id}/artifacts/{sha256}` | Authorized artifact download |
+| `GET /api/runs/{id}/artifacts/{sha256}/preview` | Authenticated text preview (up to 256 KB) |
 | `POST /api/runs/{id}/cancel` | Queued/running cancellation |
 | `POST /api/deployments`, `.../{id}/approve`, `.../{id}/reconcile` | Deployment lifecycle |
 | `GET /api/audit`, `GET /metrics` | Administrator audit records and persisted-state Prometheus metrics |

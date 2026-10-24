@@ -73,11 +73,15 @@ TaskForge 0.2 - Installation, validation, and operations
    The default Compose worker can run allowlisted HTTP jobs, or trusted Python/shell
    workloads if explicitly enabled. Both services share the artifacts volume.
 
-6. First artifact pipeline
+6. First artifact pipeline and execution
    Use examples/artifact-pipeline.json in the dashboard Pipelines JSON editor.
-   It requires Docker on the worker. Save, queue, and inspect the two step results.
+   It requires Docker on the worker. Save, queue (with optional runtime parameters),
+   and inspect the two step results in the visual DAG workflow view.
+   Steps automatically receive standard CI environment variables (CI=true,
+   TASKFORGE_RUN_ID, TASKFORGE_STEP, TASKFORGE_PROJECT, TASKFORGE_WORKSPACE).
    The verify step reads inputs/build/package.txt after SHA-256 verification.
-   Download the final artifact from the execution dialog.
+   Download or preview the final artifact directly from the execution dialog.
+   Use the terminal bar to toggle auto-scroll or copy the execution log.
 
 7. Source triggers
    Set TASKFORGE_GITHUB_REPOSITORIES to allowed public owner/repository names.

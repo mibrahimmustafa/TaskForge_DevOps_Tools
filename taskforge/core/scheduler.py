@@ -52,12 +52,21 @@ class TaskScheduler:
         )
 
     async def submit_pipeline(
-        self, pipeline: Pipeline, commit: str | None = None, dedupe: str | None = None
+        self,
+        pipeline: Pipeline,
+        commit: str | None = None,
+        dedupe: str | None = None,
+        parameters: dict[str, str] | None = None,
     ):
         return await self.storage.enqueue(
             pipeline.project,
             f"pipeline:{pipeline.project}:{pipeline.id}",
-            {"kind": "pipeline", "definition": pipeline.model_dump(mode="json"), "commit": commit},
+            {
+                "kind": "pipeline",
+                "definition": pipeline.model_dump(mode="json"),
+                "commit": commit,
+                "parameters": parameters or {},
+            },
             dedupe,
         )
 

@@ -14,7 +14,7 @@ Do not describe planned features as implemented. Do not substitute simulated job
 - PostgreSQL for team operation; SQLite for local development.
 - Immutable run snapshots with optimistic definition versions and atomic fenced claims.
 - Durable job retry scheduling; persist attempts and logs. Lost side effects require review rather than automatic replay.
-- DAG validation, independent-step concurrency, dependency failure propagation, verified artifact handoff.
+- DAG validation, independent-step concurrency, dependency failure propagation, verified artifact handoff, standard CI environment variables, and runtime parameter injection.
 - Secret values configured on the worker; definitions contain references only.
 - Explicit repository, HTTP destination, plugin, and deployment target allowlists.
 - Host execution opt-in and isolated trusted workers. Never imply Python subprocesses are a security sandbox.
@@ -26,7 +26,7 @@ Do not describe planned features as implemented. Do not substitute simulated job
 
 Maintain responsive desktop/mobile layouts, dark/light themes, labeled forms, keyboard focus, Escape dismissal, safe text rendering, clear empty/error/loading states, and role-aware controls. Display online-worker status so queued work is understandable. Tokens remain in browser memory only.
 
-Job editing must preserve optimistic versions and avoid overwriting concurrent changes. Deletion confirms intent and retains history. Pipeline dependencies, live logs, attempts, artifact downloads, approval, explicit rollback, and reconciliation must have usable entry points.
+Job editing must preserve optimistic versions and avoid overwriting concurrent changes. Deletion confirms intent and retains history. Visual pipeline dependency DAGs, live streaming logs with auto-scroll and copy controls, attempts, artifact downloads and inline previews, approval, explicit rollback, and reconciliation must have usable entry points.
 
 ## Validation and delivery
 

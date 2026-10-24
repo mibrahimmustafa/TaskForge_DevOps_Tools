@@ -64,6 +64,13 @@ async def test_full_queued_execution_logs_artifacts(client, db, settings):
     assert (
         await client.get(f"/api/runs/{identifier}/artifacts/{artifact['sha256']}")
     ).text == "verified"
+    preview_res = await client.get(f"/api/runs/{identifier}/artifacts/{artifact['sha256']}/preview")
+    assert preview_res.status_code == 200
+    assert preview_res.json()["content"] == "verified"
+    assert preview_res.json()["name"] == "result.txt"
+    assert (
+        await client.get(f"/api/runs/{identifier}/artifacts/not-exists/preview")
+    ).status_code == 404
     assert (
         await client.get(
             f"/api/runs/{identifier}/artifacts/{artifact['sha256']}",

@@ -29,7 +29,10 @@
         "dialog Escape dismissal",
         "responsive layout",
         "dark/light themes",
-        "literal text rendering"
+        "literal text rendering",
+        "interactive pipeline DAG graphs",
+        "streaming terminal controls and log copy",
+        "in-modal artifact text preview"
       ]
     },
     "api": {
@@ -80,7 +83,8 @@
         "Artifact integrity",
         "Deployment verification and reconciliation locks",
         "Notification delivery",
-        "Explicit installed-plugin lifecycle"
+        "Explicit installed-plugin lifecycle",
+        "Standard CI/CD environment variables and runtime parameter injection"
       ],
       "concurrency": "Per-worker concurrent runs and per-pipeline parallel steps",
       "retry": "Standalone jobs persist availability/attempts and release slots; pipeline steps retry within live pipeline execution",
@@ -104,6 +108,7 @@
       "max_paths_per_job": 50,
       "handoff": "Verified copy to inputs/<dependency>/<filename>",
       "access": "Authenticated project-scoped API",
+      "preview": "Authenticated text preview up to 256KB for logs, manifests, and reports",
       "retention": "Manual; automation pending",
       "secret_scanning": false
     },

@@ -27,6 +27,7 @@ def public_run(run):
         "definition_id": definition.get("id"),
         "definition_version": definition.get("version"),
         "commit": run["payload"].get("commit"),
+        "parameters": run["payload"].get("parameters", {}),
         "image": run["payload"].get("image"),
         "target": run["payload"].get("target"),
         "approved_by": run["payload"].get("approved_by"),
@@ -102,3 +103,31 @@ async def download_artifact(
     return FileResponse(
         path, filename=Path(artifact["name"]).name, media_type="application/octet-stream"
     )
+
+
+@router.get("/{run_id}/artifacts/{digest}/preview")
+async def preview_artifact(
+    run_id: str, digest: str, request: Request, principal: Principal = Depends(authenticate)
+):
+    run = await find_run(request, run_id, principal)
+    artifact = next(
+        (item for item in run["result"].get("artifacts", []) if item["sha256"] == digest), None
+    )
+    if not artifact:
+        raise HTTPException(404, "Artifact not found")
+    root = request.app.state.settings.data_dir.resolve() / "artifacts"
+    path = (root / run["project"] / run_id / digest).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(404, "Artifact is no longer available")
+    if path.stat().st_size > 256 * 1024:
+        raise HTTPException(400, "Artifact too large for inline preview (limit 256 KB)")
+    try:
+        content = path.read_text(encoding="utf-8")
+        return {
+            "name": Path(artifact["name"]).name,
+            "sha256": digest,
+            "size": path.stat().st_size,
+            "content": content,
+        }
+    except UnicodeDecodeError:
+        raise HTTPException(400, "Artifact is binary and cannot be previewed as text") from None

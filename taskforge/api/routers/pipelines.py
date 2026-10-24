@@ -1,7 +1,7 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from taskforge.api.auth import Principal, authenticate
 from taskforge.core.scheduler import validate_job
@@ -12,6 +12,7 @@ router = APIRouter(prefix="/pipelines", tags=["Pipelines"])
 
 class PipelineSubmission(BaseModel):
     commit: str | None = None
+    parameters: dict[str, str] = Field(default_factory=dict)
 
 
 @router.get("")
@@ -60,7 +61,9 @@ async def run_pipeline(
     principal.check(pipeline.project, "operator")
     if pipeline.repository and (not body.commit or not re.fullmatch(r"[a-f0-9]{40}", body.commit)):
         raise HTTPException(422, "Provide an exact 40-character Git commit SHA")
-    run = await request.app.state.scheduler.submit_pipeline(pipeline, body.commit)
+    run = await request.app.state.scheduler.submit_pipeline(
+        pipeline, body.commit, parameters=body.parameters
+    )
     await request.app.state.db.record_audit(
         pipeline.project, principal.name, "pipeline.submitted", run["id"]
     )

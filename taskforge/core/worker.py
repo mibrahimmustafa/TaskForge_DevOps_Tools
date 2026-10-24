@@ -294,6 +294,23 @@ class Worker:
             if key not in self.settings.secrets:
                 raise ValueError(f"Secret reference not configured: {reference}")
             environment[reference] = self.settings.secrets[key]
+        ci_env: dict[str, str] = {
+            "CI": "true",
+            "TASKFORGE": "true",
+            "TASKFORGE_PROJECT": run["project"],
+            "TASKFORGE_RUN_ID": run["id"],
+            "TASKFORGE_STEP": step,
+            "TASKFORGE_WORKSPACE": str(workspace),
+        }
+        if run["payload"].get("commit"):
+            ci_env["TASKFORGE_COMMIT"] = run["payload"]["commit"]
+        if run["payload"].get("parameters"):
+            for p_key, p_val in run["payload"]["parameters"].items():
+                ci_env[f"TASKFORGE_PARAM_{p_key.upper()}"] = str(p_val)
+                ci_env[p_key] = str(p_val)
+        for key, val in ci_env.items():
+            if key not in environment:
+                environment[key] = val
         attempts = (
             list(run["result"].get("attempts", [])) if run["payload"]["kind"] == "job" else []
         )

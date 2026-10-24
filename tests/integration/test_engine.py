@@ -213,6 +213,28 @@ async def test_pipeline_hands_verified_artifacts_to_dependants(db, settings):
     assert final["result"]["steps"]["verify"]["status"] == "success"
 
 
+async def test_pipeline_runtime_parameters_and_ci_environment(db, settings):
+    pipeline = Pipeline(
+        id="ci-env",
+        name="CI Environment Test",
+        steps=[
+            {
+                "id": "check-env",
+                "job": make_job().model_copy(
+                    update={
+                        "command": "import os; assert os.environ.get('CI') == 'true'; assert os.environ.get('TASKFORGE') == 'true'; assert os.environ.get('TASKFORGE_PARAM_ENVIRONMENT') == 'staging'; assert os.environ.get('ENVIRONMENT') == 'staging'"
+                    }
+                ),
+            }
+        ],
+    )
+    run = await TaskScheduler(db).submit_pipeline(pipeline, parameters={"environment": "staging"})
+    await Worker(db, settings).execute(await db.claim("fence", 30))
+    final = await db.run(run["id"])
+    assert final["status"] == "success"
+    assert final["result"]["steps"]["check-env"]["status"] == "success"
+
+
 async def test_completion_and_notification_are_atomic_and_idempotent(db):
     run = await db.enqueue("default", "job", {"kind": "job"})
     await db.claim("fence", 30)
