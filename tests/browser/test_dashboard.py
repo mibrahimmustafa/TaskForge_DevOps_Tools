@@ -73,11 +73,8 @@ def browser():
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as playwright:
-        options = {"headless": True}
         channel = os.getenv("TASKFORGE_BROWSER_CHANNEL")
-        if channel:
-            options["channel"] = channel
-        browser = playwright.chromium.launch(**options)
+        browser = playwright.chromium.launch(headless=True, channel=channel)
         yield browser
         browser.close()
 
