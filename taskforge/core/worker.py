@@ -126,7 +126,8 @@ class Worker:
                 await renew_lease()
             except Exception:
                 # Losing the coordination database must stop local execution.
-                current.cancel()
+                if current is not None:
+                    current.cancel()
 
         async def renew_lease():
             while True:
@@ -138,7 +139,8 @@ class Worker:
                     or not await self.db.owned(identifier, owner, lease=time.time() + lease)
                     or not await self.db.lock(run["resource"], owner, lock_ttl)
                 ):
-                    current.cancel()
+                    if current is not None:
+                        current.cancel()
                     return
 
         monitor = asyncio.create_task(heartbeat())
