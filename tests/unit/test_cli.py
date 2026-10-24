@@ -14,7 +14,9 @@ def test_init_creates_distinct_private_credentials_and_never_overwrites(tmp_path
     assert result.exit_code == 0
     path = tmp_path / ".taskforge" / "config.env"
     original = path.read_bytes()
-    tokens = json.loads(dotenv_values(path)["TASKFORGE_TOKENS"])
+    raw_tokens = dotenv_values(path)["TASKFORGE_TOKENS"]
+    assert raw_tokens is not None
+    tokens = json.loads(raw_tokens)
     validate_tokens(tokens)
     assert tokens[0]["name"] != tokens[1]["name"]
     assert all(entry["token"] not in result.output for entry in tokens)
