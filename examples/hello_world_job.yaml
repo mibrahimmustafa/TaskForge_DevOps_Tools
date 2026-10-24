@@ -1,0 +1,13 @@
+id: job-hello-world
+name: hello-world
+project: default
+description: Simple hello world demonstration job defined in YAML
+trigger: interval
+trigger_expr: every 1m
+executor: shell
+command: echo 'Hello from TaskForge at %TIME%!'
+status: active
+tags:
+  - demo
+  - getting-started
+  - yaml

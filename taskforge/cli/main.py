@@ -8,13 +8,16 @@ import httpx
 import typer
 
 from taskforge.core.config import get_settings
+from taskforge.core.yaml_tasks import load_yaml
 
 app = typer.Typer(help="TaskForge pipeline operations")
 jobs_app = typer.Typer(help="Manage jobs through the authenticated API")
+pipelines_app = typer.Typer(help="Manage pipelines through the authenticated API")
 users_app = typer.Typer(help="Manage users and access tokens through the authenticated API")
 server_app = typer.Typer(help="Run the API and dashboard")
 worker_app = typer.Typer(help="Run an independent execution worker")
 app.add_typer(jobs_app, name="jobs")
+app.add_typer(pipelines_app, name="pipelines")
 app.add_typer(users_app, name="users")
 app.add_typer(server_app, name="server")
 app.add_typer(worker_app, name="worker")
@@ -75,7 +78,28 @@ def list_jobs():
 
 @jobs_app.command("create")
 def create_job(file_path: Path):
-    request("POST", "/jobs", json.loads(file_path.read_text(encoding="utf-8")))
+    """Create or update a job from a YAML or JSON file."""
+    content = file_path.read_text(encoding="utf-8")
+    data = load_yaml(content)
+    request("POST", "/jobs", data)
+
+
+@jobs_app.command("yaml")
+def export_job_yaml(job_id: str):
+    """Export a job definition formatted as YAML."""
+    token = os.getenv("TASKFORGE_API_TOKEN", "")
+    if not token:
+        raise typer.BadParameter("Set TASKFORGE_API_TOKEN")
+    base = os.getenv("TASKFORGE_API_URL", "http://127.0.0.1:8080").rstrip("/")
+    with httpx.Client(timeout=30, trust_env=False) as client:
+        response = client.get(
+            f"{base}/api/jobs/{job_id}/yaml",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if response.is_error:
+        typer.echo(response.text, err=True)
+        raise typer.Exit(1)
+    typer.echo(response.text)
 
 
 @jobs_app.command("run")
@@ -91,6 +115,47 @@ def pause_job(job_id: str):
 @jobs_app.command("resume")
 def resume_job(job_id: str):
     request("POST", f"/jobs/{job_id}/resume")
+
+
+@pipelines_app.command("list")
+def list_pipelines():
+    """List all registered pipelines."""
+    request("GET", "/pipelines")
+
+
+@pipelines_app.command("create")
+def create_pipeline(file_path: Path):
+    """Create or update a pipeline from a YAML or JSON file."""
+    content = file_path.read_text(encoding="utf-8")
+    data = load_yaml(content)
+    request("POST", "/pipelines", data)
+
+
+@pipelines_app.command("run")
+def run_pipeline(
+    pipeline_id: str,
+    commit: str | None = typer.Option(None, help="Commit SHA"),
+):
+    """Queue a pipeline execution."""
+    request("POST", f"/pipelines/{pipeline_id}/run", {"commit": commit, "parameters": {}})
+
+
+@pipelines_app.command("yaml")
+def export_pipeline_yaml(pipeline_id: str):
+    """Export a pipeline definition formatted as YAML."""
+    token = os.getenv("TASKFORGE_API_TOKEN", "")
+    if not token:
+        raise typer.BadParameter("Set TASKFORGE_API_TOKEN")
+    base = os.getenv("TASKFORGE_API_URL", "http://127.0.0.1:8080").rstrip("/")
+    with httpx.Client(timeout=30, trust_env=False) as client:
+        response = client.get(
+            f"{base}/api/pipelines/{pipeline_id}/yaml",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if response.is_error:
+        typer.echo(response.text, err=True)
+        raise typer.Exit(1)
+    typer.echo(response.text)
 
 
 @users_app.command("list")
@@ -119,6 +184,26 @@ def create_user(
 def delete_user(name: str = typer.Argument(..., help="Username to delete")):
     """Revoke and delete a user account and token."""
     request("DELETE", f"/users/{name}")
+
+
+@app.command("apply")
+def apply_tasks(file_path: Path):
+    """Apply any YAML or JSON task definition (Job or Pipeline)."""
+    token = os.getenv("TASKFORGE_API_TOKEN", "")
+    if not token:
+        raise typer.BadParameter("Set TASKFORGE_API_TOKEN")
+    base = os.getenv("TASKFORGE_API_URL", "http://127.0.0.1:8080").rstrip("/")
+    content = file_path.read_text(encoding="utf-8")
+    with httpx.Client(timeout=30, trust_env=False) as client:
+        response = client.post(
+            f"{base}/api/tasks/apply",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/yaml"},
+            content=content.encode("utf-8"),
+        )
+    if response.is_error:
+        typer.echo(response.text, err=True)
+        raise typer.Exit(1)
+    typer.echo(json.dumps(response.json(), indent=2))
 
 
 @app.command("token")

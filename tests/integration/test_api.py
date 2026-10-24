@@ -310,3 +310,192 @@ async def test_user_management_lifecycle_and_role_enforcement(client):
     assert (
         await client.get("/api/session", headers={"Authorization": "Bearer " + new_token})
     ).status_code == 401
+
+
+async def test_job_yaml_endpoints(client):
+    yaml_job = """id: yaml-cron-job
+project: default
+name: YAML Cron Task
+trigger: cron
+trigger_expr: "0 4 * * *"
+timezone: UTC
+executor: python
+command: print("YAML cron execution")
+timeout_seconds: 180
+max_retries: 1
+retry_delay_seconds: 5
+description: Job created from raw YAML endpoint
+"""
+    # Create job via POST /api/jobs/yaml
+    res = await client.post(
+        "/api/jobs/yaml",
+        content=yaml_job,
+        headers={"Content-Type": "application/yaml"},
+    )
+    assert res.status_code == 200
+    job_data = res.json()
+    assert job_data["id"] == "yaml-cron-job"
+    assert job_data["name"] == "YAML Cron Task"
+
+    # Export job as YAML via GET /api/jobs/{id}/yaml
+    yaml_res = await client.get("/api/jobs/yaml-cron-job/yaml")
+    assert yaml_res.status_code == 200
+    assert "application/yaml" in yaml_res.headers.get("content-type", "")
+    assert "yaml-cron-job" in yaml_res.text
+    assert "YAML Cron Task" in yaml_res.text
+
+    # Invalid YAML syntax rejected
+    bad_syntax = "id: [broken yaml"
+    bad_res = await client.post(
+        "/api/jobs/yaml",
+        content=bad_syntax,
+        headers={"Content-Type": "application/yaml"},
+    )
+    assert bad_res.status_code == 422
+
+    # Invalid job schema rejected
+    bad_schema = """id: bad-schema-job
+project: default
+name: Bad Job
+trigger: interval
+trigger_expr: not-a-valid-interval
+executor: python
+command: pass
+"""
+    schema_res = await client.post(
+        "/api/jobs/yaml",
+        content=bad_schema,
+        headers={"Content-Type": "application/yaml"},
+    )
+    assert schema_res.status_code == 422
+
+
+async def test_pipeline_yaml_endpoints(client):
+    yaml_pipeline = """id: yaml-pipeline-sample
+project: default
+name: YAML Sample Pipeline
+version: 0
+description: Pipeline created via YAML endpoint
+steps:
+  - id: step-one
+    needs: []
+    job:
+      id: step-one
+      project: default
+      name: First Step
+      trigger: manual
+      executor: python
+      command: print("step 1")
+  - id: step-two
+    needs:
+      - step-one
+    job:
+      id: step-two
+      project: default
+      name: Second Step
+      trigger: manual
+      executor: python
+      command: print("step 2")
+"""
+    # Create pipeline via POST /api/pipelines/yaml
+    res = await client.post(
+        "/api/pipelines/yaml",
+        content=yaml_pipeline,
+        headers={"Content-Type": "application/yaml"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["id"] == "yaml-pipeline-sample"
+    assert len(data["steps"]) == 2
+
+    # Export pipeline as YAML via GET /api/pipelines/{id}/yaml
+    export_res = await client.get("/api/pipelines/yaml-pipeline-sample/yaml")
+    assert export_res.status_code == 200
+    assert "application/yaml" in export_res.headers.get("content-type", "")
+    assert "yaml-pipeline-sample" in export_res.text
+    assert "step-two" in export_res.text
+
+
+async def test_tasks_apply_and_validate(client):
+    # 1. Dry run validation: job
+    valid_job_yaml = """id: task-validate-job
+project: default
+name: Validate Me
+trigger: manual
+executor: shell
+command: echo "Validated"
+"""
+    val_job_res = await client.post(
+        "/api/tasks/validate",
+        content=valid_job_yaml,
+        headers={"Content-Type": "application/yaml"},
+    )
+    assert val_job_res.status_code == 200
+    assert val_job_res.json()["valid"] is True
+    assert val_job_res.json()["kind"] == "job"
+    assert val_job_res.json()["id"] == "task-validate-job"
+
+    # 2. Dry run validation: pipeline
+    valid_pipe_yaml = """id: task-validate-pipe
+project: default
+name: Validate Pipeline
+version: 0
+steps:
+  - id: s1
+    needs: []
+    job:
+      id: s1
+      project: default
+      name: Step 1
+      trigger: manual
+      executor: shell
+      command: echo "step1"
+"""
+    val_pipe_res = await client.post(
+        "/api/tasks/validate",
+        content=valid_pipe_yaml,
+        headers={"Content-Type": "application/yaml"},
+    )
+    assert val_pipe_res.status_code == 200
+    assert val_pipe_res.json()["valid"] is True
+    assert val_pipe_res.json()["kind"] == "pipeline"
+    assert val_pipe_res.json()["steps_count"] == 1
+
+    # 3. Apply multi-document stream containing both a job and a pipeline
+    multi_doc_yaml = """---
+id: applied-stream-job
+project: default
+name: Applied Stream Job
+trigger: manual
+executor: python
+command: print("stream job")
+---
+id: applied-stream-pipeline
+project: default
+name: Applied Stream Pipeline
+version: 0
+steps:
+  - id: test
+    needs: []
+    job:
+      id: test
+      project: default
+      name: Run tests
+      trigger: manual
+      executor: python
+      command: print("stream tests")
+"""
+    apply_res = await client.post(
+        "/api/tasks/apply",
+        content=multi_doc_yaml,
+        headers={"Content-Type": "application/yaml"},
+    )
+    assert apply_res.status_code == 200
+    apply_data = apply_res.json()
+    assert apply_data["total"] == 2
+    kinds = [item["kind"] for item in apply_data["applied"]]
+    assert "job" in kinds and "pipeline" in kinds
+
+    # Verify both can be queried via their respective endpoints
+    assert (await client.get("/api/jobs/applied-stream-job")).status_code == 200
+    assert (await client.get("/api/pipelines/applied-stream-pipeline")).status_code == 200

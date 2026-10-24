@@ -1,12 +1,14 @@
 # TaskForge
 
-TaskForge 0.2 is a self-hosted CI/CD and task automation system with a FastAPI control plane, independent execution workers, PostgreSQL or SQLite persistence, and a browser dashboard.
+TaskForge 0.3 is a self-hosted CI/CD and task automation system with a FastAPI control plane, independent execution workers, PostgreSQL or SQLite persistence, and a browser dashboard.
 
 It supports **artifact-only pipelines, Docker deployment, and Kubernetes deployment**. Deployments promote a digest recorded by a successful build, can require a different administrator's approval, verify service health, and attempt to restore the previous release on failure.
 
 ## What is implemented
 
 - Manual, cron, interval, one-shot, signed GitHub push, and secret-protected webhook triggers.
+- Declarative YAML/JSON task definitions for standalone jobs and multi-step DAG pipelines, multi-document streaming (`---`), live syntax dry-run validation, sensitive secret redaction on export, and `taskforge apply` CLI support.
+- Dashboard declarative task creation dialog with quick-start templates (Python cron, Docker task, Shell script, CI/CD pipeline), live validation badges, and 1-click clipboard copy / file download.
 - Versioned job and pipeline definitions, immutable run snapshots, dependency validation, parallel independent steps, and verified artifact handoff to dependent steps.
 - Standard CI/CD runner environment variables (`CI=true`, `TASKFORGE_PROJECT`, `TASKFORGE_RUN_ID`, `TASKFORGE_STEP`, `TASKFORGE_WORKSPACE`, `TASKFORGE_COMMIT`) and dynamic runtime parameters.
 - Atomic queue claims, unique execution fences, worker heartbeats, resource locks, timeout/cancellation cleanup, durable standalone-job retries, and persisted attempts.
@@ -91,9 +93,96 @@ Secret values belong in the runner environment, never job commands, repository f
 
 Use TLS at your reverse proxy for remote access. Restrict worker credentials and egress to the services those workers need. Static tokens require manual rotation; OIDC and a managed secret store are follow-up work.
 
+## Declarative YAML task definitions
+
+All tasks—both standalone scheduled jobs and multi-step DAG pipelines—can be defined, imported, exported, and managed in human-readable YAML.
+
+YAML eliminates escaped newlines and quote escaping, making multiline shell and Python scripts clean and maintainable.
+
+### Example: Scheduled Job in YAML ([examples/hello_world_job.yaml](examples/hello_world_job.yaml))
+
+```yaml
+id: job-hello-world
+name: hello-world
+project: default
+description: Simple hello world demonstration job defined in YAML
+trigger: interval
+trigger_expr: every 1m
+executor: shell
+command: echo 'Hello from TaskForge at %TIME%!'
+status: active
+tags:
+  - demo
+  - getting-started
+  - yaml
+```
+
+### Example: Multi-step DAG Pipeline in YAML ([examples/artifact-pipeline.yaml](examples/artifact-pipeline.yaml))
+
+```yaml
+id: artifact-demo
+project: default
+name: Build and verify an artifact
+version: 0
+description: Multi-step verification pipeline defined cleanly in YAML
+steps:
+  - id: build
+    needs: []
+    job:
+      id: build
+      project: default
+      name: Build
+      trigger: manual
+      executor: docker
+      image: python:3.12-alpine
+      command: |
+        python -c "from pathlib import Path; Path('package.txt').write_text('verified package'); print('Built package')"
+      artifact_paths:
+        - package.txt
+
+  - id: verify
+    needs:
+      - build
+    job:
+      id: verify
+      project: default
+      name: Verify
+      trigger: manual
+      executor: docker
+      image: python:3.12-alpine
+      command: |
+        python -c "from pathlib import Path; assert Path('inputs/build/package.txt').read_text() == 'verified package'; print('Artifact verified')"
+```
+
+### Applying and exporting tasks via Dashboard and CLI
+
+- **Dashboard**:
+  - Click **📄 Add from YAML** in the Jobs or Pipelines header.
+  - Pick from quick-start templates (Python cron, Docker task, Shell script, CI/CD pipeline).
+  - Click **🔍 Validate YAML** to dry-run syntax and model validation before persisting.
+  - Click **Apply task definition** to persist jobs or pipelines.
+  - Click **YAML** on any job row or pipeline card to open the export modal with 1-click **📋 Copy YAML** and **⬇ Download .yaml**.
+  - Pipeline editing natively loads and saves in YAML.
+- **CLI**:
+  ```powershell
+  $env:TASKFORGE_API_TOKEN = "your-admin-token"
+
+  # Declaratively apply single or multi-document YAML files
+  .\.venv\Scripts\taskforge.exe apply examples/hello_world_job.yaml
+  .\.venv\Scripts\taskforge.exe apply examples/artifact-pipeline.yaml
+
+  # Create tasks directly from YAML
+  .\.venv\Scripts\taskforge.exe jobs create examples/hello_world_job.yaml
+  .\.venv\Scripts\taskforge.exe pipelines create examples/artifact-pipeline.yaml
+
+  # Export definition as YAML to stdout or file
+  .\.venv\Scripts\taskforge.exe jobs yaml job-hello-world
+  .\.venv\Scripts\taskforge.exe pipelines yaml artifact-demo
+  ```
+
 ## Pipelines and artifacts
 
-Create a pipeline through the dashboard JSON editor or `POST /api/pipelines`. [examples/artifact-pipeline.json](examples/artifact-pipeline.json) is a runnable Docker example: one step produces a file and another reads `inputs/build/package.txt`.
+Create a pipeline through the dashboard YAML editor, `POST /api/pipelines/yaml`, or `POST /api/pipelines`. [examples/artifact-pipeline.yaml](examples/artifact-pipeline.yaml) is a runnable Docker example: one step produces a file and another reads `inputs/build/package.txt`.
 
 Each run captures the submitted definition version. `needs` defines dependencies; cycles and unknown step IDs are rejected. Failed dependencies skip their descendants. Artifacts are copied into dependent workspaces under `inputs/<step-id>/<filename>` after checksum verification.
 
@@ -184,10 +273,14 @@ Interactive API schemas are at `/docs`. Supply `Authorization: Bearer <token>` f
 | `GET /health`, `GET /ready` | API liveness and database readiness; readiness does not imply a worker is online |
 | `GET /api/session`, `GET /api/system/stats` | Identity, scoped run counts, online worker count |
 | `GET/POST /api/jobs` | List/save jobs; updates require the current `version` |
+| `POST /api/jobs/yaml`, `GET /api/jobs/{id}/yaml` | Save and export job definitions in clean YAML format |
 | `POST /api/jobs/{id}/run` | Queue immutable snapshot; optional `Idempotency-Key` |
 | `POST /api/jobs/{id}/pause`, `.../resume` | Change persisted schedule |
 | `DELETE /api/jobs/{id}?version=N` | Delete definition, preserving history |
 | `GET/POST /api/pipelines`, `POST /api/pipelines/{id}/run` | Manage and run DAG pipelines |
+| `POST /api/pipelines/yaml`, `GET /api/pipelines/{id}/yaml` | Save and export pipeline DAG definitions in clean YAML format |
+| `POST /api/tasks/apply` | Declaratively apply single or multi-document (`---`) YAML/JSON tasks (jobs and pipelines) |
+| `POST /api/tasks/validate` | Dry-run syntax and schema validation for YAML task definitions without saving |
 | `GET /api/runs?limit=50&offset=0` | Paginated execution history |
 | `GET /api/runs/{id}/logs?after=0` | Cursor-based logs |
 | `GET /api/runs/{id}/attempts` | Persisted attempt records |

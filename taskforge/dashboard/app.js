@@ -255,8 +255,14 @@ function render(){
   $('page-eyebrow').textContent=eyebrow;
   $('page-description').textContent=description;
   const actions=[];
-  if(['jobs','overview'].includes(state.page)&&isAdmin())actions.push(button('+ Create job',()=>editJob(),'primary'));
-  if(state.page==='pipelines'&&isAdmin())actions.push(button('+ Create pipeline',()=>editPipeline(),'primary'));
+  if(['jobs','overview'].includes(state.page)&&isAdmin()){
+    actions.push(button('📄 Add from YAML',()=>importYamlDialog('job'),'secondary'));
+    actions.push(button('+ Create job',()=>editJob(),'primary'));
+  }
+  if(state.page==='pipelines'&&isAdmin()){
+    actions.push(button('📄 Add from YAML',()=>importYamlDialog('pipeline'),'secondary'));
+    actions.push(button('+ Create pipeline',()=>editPipeline(),'primary'));
+  }
   if(state.page==='deployments'&&canOperate())actions.push(button('+ Request deployment',()=>deploymentForm(),'primary'));
   if(state.page==='users'&&isAdmin())actions.push(button('+ Add user',()=>createUserForm(),'primary'));
   $('page-actions').replaceChildren(...actions);
@@ -330,15 +336,16 @@ function jobsPage(content){
           if(run)openRun(run.id);
         },'',!canOperate()),
         button(job.status==='paused'?'Resume':'Pause',()=>action('/jobs/'+job.id+'/'+(job.status==='paused'?'resume':'pause')),'',!canOperate()),
+        button('YAML',()=>showYamlModal('job',job.id),'quiet'),
         button('Edit',()=>editJob(job),'',!isAdmin()),
         button('Delete',()=>deleteJob(job),'danger',!isAdmin())
       )
     ))
   ):empty(
     state.query?'No matching jobs':'Start with one useful job',
-    state.query?'Try another name or project.':'Create a task, choose when it runs, and follow its actual output.',
-    isAdmin()&&!state.query?'Create job':'',
-    ()=>editJob()
+    state.query?'Try another name or project.':'Create a task or import from YAML, choose when it runs, and follow its actual output.',
+    isAdmin()&&!state.query?'Add from YAML':'',
+    ()=>importYamlDialog('job')
   )));
 }
 
@@ -387,6 +394,7 @@ function pipelinesPage(content){
       el('p',{className:'muted'},pipeline.description||pipeline.project+' · version '+pipeline.version+(pipeline.repository?' · '+pipeline.repository:'')),
       flow,
       el('div',{className:'form-actions'},
+        button('YAML',()=>showYamlModal('pipeline',pipeline.id),'quiet'),
         button('Edit definition',()=>editPipeline(pipeline),'',!isAdmin()),
         button('Run pipeline',()=>runPipelineForm(pipeline),'primary',!canOperate())
       )
@@ -570,25 +578,59 @@ function deleteJob(job){
   },'Delete job'));
 }
 
-function editPipeline(pipeline){
+async function editPipeline(pipeline){
   const project=state.session.projects[0]==='*'?'default':state.session.projects[0];
-  const template=pipeline||{
-    id:'pipeline-'+Date.now(),
-    project,
-    name:'Build and verify',
-    description:'Test, then collect a release artifact.',
-    version:0,
-    steps:[
-      {id:'test',needs:[],job:{id:'test',project,name:'Run tests',trigger:'manual',executor:'docker',image:'python:3.12-alpine',command:'python -c "print(42)"'}},
-      {id:'package',needs:['test'],job:{id:'package',project,name:'Package artifact',trigger:'manual',executor:'docker',image:'alpine:3.20',command:'echo verified > result.txt',artifact_paths:['result.txt']}}
-    ]
-  };
-  const content=dialog(pipeline?'Edit pipeline':'Create pipeline');
-  content.append(el('p',{className:'muted'},'Define steps and their needs. Cycles and unknown dependencies are rejected before saving. Repository pipelines require an allowlisted repository and exact commit.'));
+  let defaultYaml = '';
+  if(pipeline){
+    try{
+      const res = await fetch('/api/pipelines/'+encodeURIComponent(pipeline.id)+'/yaml',{
+        headers:{Authorization:'Bearer '+state.token}
+      });
+      if(res.ok) defaultYaml = await res.text();
+    }catch(_){}
+  }
+  if(!defaultYaml){
+    defaultYaml = `id: ${pipeline?.id || 'pipeline-' + Date.now()}
+project: ${pipeline?.project || project}
+name: ${pipeline?.name || 'Build and verify'}
+description: ${pipeline?.description || 'Test, then collect a release artifact.'}
+version: ${pipeline?.version || 0}
+steps:
+  - id: test
+    needs: []
+    job:
+      id: test
+      project: ${pipeline?.project || project}
+      name: Run tests
+      trigger: manual
+      executor: docker
+      image: python:3.12-alpine
+      command: python -c "print(42)"
+  - id: package
+    needs: [test]
+    job:
+      id: package
+      project: ${pipeline?.project || project}
+      name: Package artifact
+      trigger: manual
+      executor: docker
+      image: alpine:3.20
+      command: echo verified > result.txt
+      artifact_paths:
+        - result.txt
+`;
+  }
+  const content=dialog(pipeline?'Edit pipeline':'Create pipeline','PIPELINE DEFINITION (YAML)');
+  content.append(el('p',{className:'muted'},'Define steps and their needs in YAML or JSON. Cycles and unknown dependencies are rejected before saving. Repository pipelines require an allowlisted repository and exact commit.'));
   content.append(saveForm(
-    el('form',{},field('Pipeline definition (JSON)','definition',JSON.stringify(template,null,2),{multiline:true,rows:20,required:true})),
+    el('form',{},field('Pipeline definition (YAML)','definition',defaultYaml,{multiline:true,rows:20,required:true})),
     async data=>{
-      await api('/pipelines',{method:'POST',body:JSON.stringify(JSON.parse(data.get('definition')))});
+      const raw = data.get('definition');
+      await api('/pipelines/yaml',{
+        method:'POST',
+        headers:{'Content-Type':'application/yaml'},
+        body:raw
+      });
       toast('Pipeline saved');
     },
     'Save pipeline'
@@ -745,6 +787,280 @@ function deleteUserDialog(user){
       toast('User '+user.name+' revoked');
     },'Revoke access')
   );
+}
+
+const YAML_TEMPLATES = {
+  python_cron: {
+    label: '🐍 Python cron job',
+    yaml: `id: scheduled-python-job
+project: default
+name: Scheduled Python Task
+trigger: cron
+trigger_expr: "0 3 * * *"
+timezone: UTC
+executor: python
+command: |
+  import sys
+  print("Running scheduled maintenance in Python...")
+  print("Status: all checks nominal.")
+timeout_seconds: 300
+max_retries: 2
+retry_delay_seconds: 10
+description: Scheduled nightly Python maintenance task
+`
+  },
+  docker_task: {
+    label: '🐳 Docker task',
+    yaml: `id: docker-verify-task
+project: default
+name: Docker Container Task
+trigger: manual
+executor: docker
+image: python:3.12-alpine
+command: |
+  python -c "print('Containerized task executing in isolated Docker runner')"
+timeout_seconds: 180
+max_retries: 1
+retry_delay_seconds: 5
+description: Containerized verification task
+`
+  },
+  shell_task: {
+    label: '🐚 Shell script job',
+    yaml: `id: shell-backup-task
+project: default
+name: Shell Log Archiver
+trigger: interval
+trigger_expr: "every 6h"
+executor: shell
+command: |
+  echo "Compressing logs and archiving system state..."
+  echo "Archive generated successfully."
+timeout_seconds: 120
+max_retries: 0
+retry_delay_seconds: 5
+description: Periodic shell archiver
+`
+  },
+  pipeline: {
+    label: '⌘ CI/CD Pipeline',
+    yaml: `id: build-test-pipeline
+project: default
+name: Build and Verify Pipeline
+description: Multi-step pipeline with parallel test stage and sealed artifact packaging
+steps:
+  - id: unit-tests
+    needs: []
+    job:
+      id: unit-tests
+      project: default
+      name: Run Unit Tests
+      executor: docker
+      image: python:3.12-alpine
+      command: |
+        python -c "print('Unit tests passed: 42 passed, 0 failed')"
+  - id: security-audit
+    needs: []
+    job:
+      id: security-audit
+      project: default
+      name: Security Scan
+      executor: docker
+      image: alpine:3.20
+      command: |
+        echo "Running security audit... 0 vulnerabilities detected."
+  - id: package-release
+    needs: [unit-tests, security-audit]
+    job:
+      id: package-release
+      project: default
+      name: Package Release Artifact
+      executor: docker
+      image: alpine:3.20
+      command: |
+        echo '{"release": "v1.0.0", "status": "verified"}' > release.json
+      artifact_paths:
+        - release.json
+`
+  }
+};
+
+function importYamlDialog(defaultKind='job'){
+  const content = dialog('Add task from YAML', 'DECLARATIVE TASK CONFIGURATION');
+  const defaultTemplateKey = defaultKind === 'pipeline' ? 'pipeline' : 'python_cron';
+  const initialYaml = YAML_TEMPLATES[defaultTemplateKey].yaml;
+
+  const chipsContainer = el('div', {className: 'template-chips'});
+  const textarea = el('textarea', {
+    id: 'yaml-task-input',
+    className: 'yaml-editor',
+    rows: 18,
+    required: true,
+    placeholder: 'Paste or type your Job or Pipeline YAML here…'
+  });
+  textarea.value = initialYaml;
+
+  const validationBox = el('div', {id: 'yaml-validation-feedback'});
+
+  Object.entries(YAML_TEMPLATES).forEach(([key, tpl]) => {
+    const chip = el('button', {
+      type: 'button',
+      className: 'template-chip' + (key === defaultTemplateKey ? ' active' : '')
+    }, tpl.label);
+    chip.onclick = () => {
+      textarea.value = tpl.yaml;
+      chipsContainer.querySelectorAll('.template-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      validationBox.replaceChildren();
+    };
+    chipsContainer.append(chip);
+  });
+
+  const validateBtn = el('button', {type: 'button', className: 'secondary', id: 'btn-validate-yaml'}, '🔍 Validate YAML');
+  validateBtn.onclick = async () => {
+    validationBox.replaceChildren();
+    const raw = textarea.value.trim();
+    if (!raw) {
+      validationBox.append(el('p', {className: 'error-text'}, 'Please enter YAML content to validate.'));
+      return;
+    }
+    validateBtn.disabled = true;
+    try {
+      const res = await api('/tasks/validate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/yaml'},
+        body: raw
+      });
+      const badgeText = res.kind === 'pipeline'
+        ? `✓ Valid pipeline: "${res.name}" (${res.id}) · ${res.steps_count} step(s)`
+        : `✓ Valid job: "${res.name}" (${res.id}) · ${res.executor} executor · ${res.trigger}`;
+      validationBox.append(el('div', {className: 'yaml-validation-success'}, badgeText));
+    } catch (err) {
+      validationBox.append(el('p', {className: 'error-text'}, 'Syntax/Validation error: ' + err.message));
+    } finally {
+      validateBtn.disabled = false;
+    }
+  };
+
+  const form = el('form', {id: 'yaml-import-form'},
+    el('div', {className: 'info-strip'},
+      'Define jobs or multi-step DAG pipelines declaratively using clean YAML. Multiple documents (---) are supported.'
+    ),
+    el('div', {style: 'margin-bottom: 8px;'},
+      el('strong', {style: 'font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;'}, 'Quick Templates:'),
+      chipsContainer
+    ),
+    el('div', {className: 'yaml-editor-wrap'},
+      textarea
+    ),
+    validationBox
+  );
+
+  const error = el('p', {className: 'error-text', role: 'alert'});
+  const submitBtn = el('button', {type: 'submit', className: 'primary', id: 'btn-apply-yaml'}, 'Apply task definition');
+  const actions = el('div', {className: 'form-actions'},
+    button('Cancel', () => $('editor').close(), 'quiet'),
+    validateBtn,
+    submitBtn
+  );
+  form.append(error, actions);
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    error.textContent = '';
+    submitBtn.disabled = true;
+    const raw = textarea.value.trim();
+    if (!raw) {
+      error.textContent = 'Please provide YAML content.';
+      submitBtn.disabled = false;
+      return;
+    }
+    try {
+      const result = await api('/tasks/apply', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/yaml'},
+        body: raw
+      });
+      const count = result.total || (result.applied ? result.applied.length : 1);
+      const firstId = result.applied && result.applied[0] ? result.applied[0].id : 'definition';
+      toast(`Applied ${count} task(s) successfully (${firstId})`);
+      $('editor').close();
+      await refresh();
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  content.append(form);
+}
+
+async function showYamlModal(kind, id){
+  const title = `Export ${kind === 'job' ? 'Job' : 'Pipeline'} YAML`;
+  const content = dialog(title, 'DECLARATIVE DEFINITION');
+
+  const loading = el('p', {className: 'muted'}, 'Loading YAML definition…');
+  content.append(loading);
+
+  try {
+    const res = await fetch(`/api/${kind === 'job' ? 'jobs' : 'pipelines'}/${encodeURIComponent(id)}/yaml`, {
+      headers: { Authorization: 'Bearer ' + state.token }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to export YAML');
+    }
+    const yamlContent = await res.text();
+    loading.remove();
+
+    const textarea = el('textarea', {
+      className: 'yaml-editor',
+      rows: 18,
+      readonly: true,
+      tabIndex: 0,
+      'aria-label': `${kind} YAML definition`
+    });
+    textarea.value = yamlContent;
+
+    const copyBtn = el('button', {type: 'button', className: 'primary'}, '📋 Copy YAML');
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(yamlContent);
+        copyBtn.textContent = '✓ Copied!';
+        setTimeout(() => { copyBtn.textContent = '📋 Copy YAML'; }, 3000);
+        toast('YAML copied to clipboard');
+      } catch (_) {
+        toast('Could not copy automatically; please copy from the text area.', true);
+      }
+    };
+
+    const downloadBtn = el('button', {type: 'button', className: 'secondary'}, '⬇ Download .yaml');
+    downloadBtn.onclick = () => {
+      const blob = new Blob([yamlContent], {type: 'application/yaml;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${id}.yaml`;
+      document.body.append(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast(`Downloaded ${id}.yaml`);
+    };
+
+    content.append(
+      el('div', {className: 'info-strip'}, `Declarative ${kind} definition for ${id}. You can use this file with "taskforge apply" or import it in any TaskForge workspace.`),
+      el('div', {className: 'yaml-editor-wrap'}, textarea),
+      el('div', {className: 'form-actions', style: 'margin-top: 14px;'},
+        button('Close', () => $('editor').close(), 'quiet'),
+        downloadBtn,
+        copyBtn
+      )
+    );
+  } catch (err) {
+    loading.textContent = 'Error: ' + err.message;
+  }
 }
 
 async function openRun(id){

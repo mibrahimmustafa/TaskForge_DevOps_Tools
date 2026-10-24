@@ -17,6 +17,7 @@ from taskforge.api.routers import (
     plugins,
     runs,
     system,
+    tasks,
     triggers,
     users,
 )
@@ -92,7 +93,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     app.add_middleware(BodyLimitMiddleware)
 
     app.include_router(system.router)
-    for module in (jobs, runs, pipelines, deployments, triggers, plugins, users):
+    for module in (jobs, runs, pipelines, deployments, triggers, plugins, users, tasks):
         app.include_router(module.router, prefix="/api")
     dashboard = Path(__file__).resolve().parents[1] / "dashboard"
     app.mount("/dashboard", StaticFiles(directory=dashboard, html=True), name="dashboard")

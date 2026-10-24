@@ -1,6 +1,6 @@
 {
   "project": "TaskForge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "schema_version": 1,
   "repository": "https://github.com/mibrahimmustafa/TaskForge_DevOps_Tools",
   "description": "Self-hosted CI/CD and task automation for trusted teams",
@@ -33,7 +33,9 @@
         "literal text rendering",
         "interactive pipeline DAG graphs",
         "streaming terminal controls and log copy",
-        "in-modal artifact text preview"
+        "in-modal artifact text preview",
+        "declarative YAML/JSON task definition with templates and syntax validation",
+        "YAML export with 1-click clipboard copy and file download"
       ]
     },
     "api": {
@@ -48,7 +50,18 @@
       ],
       "authorization": "Project scopes checked on definitions, runs, logs, artifacts, and deployment requests",
       "user_management": "Admin-controlled user provisioning with role hierarchy (admin, operator, viewer), project scoping, token generation, rotation, and revocation",
+      "declarative_yaml_endpoints": "POST /api/jobs/yaml, GET /api/jobs/{id}/yaml, POST /api/pipelines/yaml, GET /api/pipelines/{id}/yaml, POST /api/tasks/apply, and POST /api/tasks/validate",
       "request_body_limit_bytes": 1048576
+    },
+    "yaml_tasks": {
+      "path": "taskforge/core/yaml_tasks.py",
+      "capabilities": [
+        "Safe PyYAML serialization and deserialization",
+        "Automatic task kind detection (standalone job vs multi-step DAG pipeline)",
+        "Multi-document YAML streams (---)",
+        "Sensitive webhook secret redaction on export",
+        "Dry-run syntax and schema validation"
+      ]
     },
     "storage": {
       "path": "taskforge/storage/database.py",

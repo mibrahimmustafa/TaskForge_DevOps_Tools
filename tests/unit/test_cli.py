@@ -28,3 +28,15 @@ def test_api_cli_requires_token(monkeypatch):
     assert result.exit_code != 0 and "TASKFORGE_API_TOKEN" in result.output
     user_result = CliRunner().invoke(app, ["users", "list"])
     assert user_result.exit_code != 0 and "TASKFORGE_API_TOKEN" in user_result.output
+    yaml_job_result = CliRunner().invoke(app, ["jobs", "yaml", "job-123"])
+    assert yaml_job_result.exit_code != 0 and "TASKFORGE_API_TOKEN" in yaml_job_result.output
+    yaml_pipe_result = CliRunner().invoke(app, ["pipelines", "yaml", "pipe-123"])
+    assert yaml_pipe_result.exit_code != 0 and "TASKFORGE_API_TOKEN" in yaml_pipe_result.output
+
+
+def test_cli_apply_requires_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("TASKFORGE_API_TOKEN", raising=False)
+    test_file = tmp_path / "task.yaml"
+    test_file.write_text("id: demo\nname: Demo\n")
+    result = CliRunner().invoke(app, ["apply", str(test_file)])
+    assert result.exit_code != 0 and "TASKFORGE_API_TOKEN" in result.output

@@ -198,3 +198,51 @@ def test_user_management_ui_workflow(browser, live_server):
 
     assert not errors
     page.close()
+
+
+def test_yaml_task_workflow(browser, live_server):
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(live_server)
+    page.get_by_label("Access token").fill(TOKEN)
+    page.get_by_role("button", name="Open workspace").click()
+    page.get_by_role("heading", name="Overview", exact=True).wait_for()
+
+    # Navigate to Jobs page
+    page.get_by_role("link", name="Jobs", exact=True).click()
+    page.get_by_role("heading", name="Jobs", exact=True).wait_for()
+
+    # Click "+ Add from YAML" button
+    page.get_by_role("button", name="📄 Add from YAML", exact=True).click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+    page.get_by_role("heading", name="Add task from YAML", exact=True).wait_for()
+
+    # Test template chips
+    page.get_by_role("button", name="🐍 Python cron job", exact=True).click()
+    textarea = page.locator("#yaml-task-input")
+    assert "scheduled-python-job" in textarea.input_value()
+
+    # Click Validate YAML
+    page.locator("#btn-validate-yaml").click()
+    page.locator(".yaml-validation-success").wait_for()
+    assert "Valid job" in page.locator(".yaml-validation-success").text_content()
+
+    # Apply task
+    page.locator("#btn-apply-yaml").click()
+    page.wait_for_timeout(1000)
+
+    # Verify job appears in table
+    row = page.get_by_role("row").filter(has_text="Scheduled Python Task")
+    row.wait_for()
+    assert "active" in row.text_content()
+
+    # Click YAML export on the job row
+    row.get_by_role("button", name="YAML", exact=True).click()
+    page.get_by_role("heading", name="Export Job YAML", exact=True).wait_for()
+    assert "scheduled-python-job" in page.get_by_role("dialog").locator("textarea").input_value()
+    page.get_by_role("button", name="Close", exact=True).click()
+
+    assert not errors
+    page.close()

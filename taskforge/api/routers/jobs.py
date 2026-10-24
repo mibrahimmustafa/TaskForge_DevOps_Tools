@@ -1,8 +1,9 @@
 import hashlib
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from taskforge.api.auth import Principal, authenticate
+from taskforge.core.yaml_tasks import job_to_yaml, load_yaml
 from taskforge.jobs.models import Job, JobStatus
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -16,16 +17,7 @@ async def find_job(request: Request, job_id: str, principal: Principal, role="vi
     return Job.model_validate(value)
 
 
-@router.get("")
-async def list_jobs(request: Request, principal: Principal = Depends(authenticate)):
-    return [
-        Job.model_validate(value).to_dict()
-        for value in await request.app.state.db.list("job", principal.scope)
-    ]
-
-
-@router.post("")
-async def save_job(job: Job, request: Request, principal: Principal = Depends(authenticate)):
+async def persist_job(job: Job, request: Request, principal: Principal) -> dict:
     principal.check(job.project, "admin")
     old = await request.app.state.db.get("job", job.id)
     if old:
@@ -39,6 +31,34 @@ async def save_job(job: Job, request: Request, principal: Principal = Depends(au
     saved = await request.app.state.scheduler.add_or_update_job(job)
     await request.app.state.db.record_audit(job.project, principal.name, "job.saved", job.id)
     return saved.to_dict()
+
+
+@router.get("")
+async def list_jobs(request: Request, principal: Principal = Depends(authenticate)):
+    return [
+        Job.model_validate(value).to_dict()
+        for value in await request.app.state.db.list("job", principal.scope)
+    ]
+
+
+@router.post("")
+async def save_job(job: Job, request: Request, principal: Principal = Depends(authenticate)):
+    return await persist_job(job, request, principal)
+
+
+@router.post("/yaml")
+async def save_job_yaml(request: Request, principal: Principal = Depends(authenticate)):
+    raw = await request.body()
+    data = load_yaml(raw)
+    data.pop("kind", None)
+    job = Job.model_validate(data)
+    return await persist_job(job, request, principal)
+
+
+@router.get("/{job_id}/yaml")
+async def get_job_yaml(job_id: str, request: Request, principal: Principal = Depends(authenticate)):
+    job = await find_job(request, job_id, principal)
+    return Response(content=job_to_yaml(job), media_type="application/yaml")
 
 
 @router.get("/{job_id}")

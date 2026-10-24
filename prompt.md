@@ -22,12 +22,13 @@ Do not describe planned features as implemented. Do not substitute simulated job
 - Environment serialization, health/rollout verification, rollback attempts, stale-build rejection, and explicit reconciliation after interrupted deployment.
 - Terminal run state and completion notification queue committed in one transaction.
 - Dynamic database user provisioning and authentication with role hierarchy (admin, operator, viewer), project scoping, token generation, rotation, and revocation.
+- Declarative YAML/JSON task definitions (jobs and multi-step DAG pipelines), multi-document streaming (`---`), sensitive secret redaction on export, dry-run syntax/schema validation, and `taskforge apply` CLI support.
 
 ## User experience
 
 Maintain responsive desktop/mobile layouts, dark/light themes, labeled forms, keyboard focus, Escape dismissal, safe text rendering, clear empty/error/loading states, and role-aware controls. Display online-worker status so queued work is understandable. Tokens remain in browser memory only.
 
-Job editing must preserve optimistic versions and avoid overwriting concurrent changes. Deletion confirms intent and retains history. Visual pipeline dependency DAGs, live streaming logs with auto-scroll and copy controls, attempts, artifact downloads and inline previews, user and token administration with secure copy dialogs, approval, explicit rollback, and reconciliation must have usable entry points.
+Job editing must preserve optimistic versions and avoid overwriting concurrent changes. Deletion confirms intent and retains history. Declarative YAML import with interactive templates and live syntax validation, 1-click YAML copy and export downloads, visual pipeline dependency DAGs, live streaming logs with auto-scroll and copy controls, attempts, artifact downloads and inline previews, user and token administration with secure copy dialogs, approval, explicit rollback, and reconciliation must have usable entry points.
 
 ## Validation and delivery
 

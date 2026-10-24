@@ -135,6 +135,19 @@ button.primary:hover:not(:disabled) {
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
 }
 
+button.secondary {
+  background: var(--panel2);
+  border-color: var(--line);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--panel-hover);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
 button.quiet {
   background: transparent;
   border-color: transparent;
@@ -873,6 +886,78 @@ tbody tr:hover {
   font-size: 12.5px;
   font-weight: 550;
   color: var(--text);
+}
+
+/* YAML Editor & Templates */
+.yaml-editor-wrap {
+  position: relative;
+  margin: 12px 0;
+}
+
+.yaml-editor {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  width: 100%;
+  resize: vertical;
+  min-height: 280px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.yaml-editor:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-border);
+}
+
+:root[data-theme="light"] .yaml-editor {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: var(--line-light);
+}
+
+.template-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  align-items: center;
+}
+
+.template-chip {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.template-chip:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.yaml-validation-success {
+  padding: 10px 14px;
+  background: var(--green-bg);
+  border: 1px solid var(--green-border);
+  color: var(--green);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 600;
+  margin: 10px 0;
 }
 
 footer {

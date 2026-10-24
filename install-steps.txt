@@ -1,4 +1,4 @@
-TaskForge 0.2 - Installation, validation, and operations
+TaskForge 0.3 - Installation, validation, and operations
 =====================================================
 
 1. Prerequisites
@@ -59,7 +59,32 @@ TaskForge 0.2 - Installation, validation, and operations
      Configure TASKFORGE_ALLOWED_HTTP_HOSTS='["api.example.com"]'.
      Redirects and ambient proxy environment settings are not followed.
 
-5. User and access management
+5. Declarative YAML task definitions & CLI apply
+   Define jobs and multi-step DAG pipelines cleanly in YAML or JSON without escaping quotes.
+   Multiple documents separated by `---` are automatically parsed and persisted.
+
+   Via Dashboard:
+     - Click '📄 Add from YAML' on either the Jobs or Pipelines view.
+     - Choose from quick templates (Python cron, Docker task, Shell archiver, CI/CD pipeline).
+     - Click '🔍 Validate YAML' to dry-run syntax and schema validation before applying.
+     - Click 'Apply task definition' to persist directly into the database.
+     - In table and card rows, click 'YAML' to open the export modal with 1-click clipboard copy
+       or direct .yaml file download.
+     - When editing pipelines, definitions load in YAML and save directly via /api/pipelines/yaml.
+
+   Via CLI:
+     Set $env:TASKFORGE_API_TOKEN to your administrator or operator token.
+     Apply task file (supports .yaml, .yml, and .json):
+       .\.venv\Scripts\taskforge.exe apply examples/hello_world_job.yaml
+       .\.venv\Scripts\taskforge.exe apply examples/artifact-pipeline.yaml
+     Create from YAML:
+       .\.venv\Scripts\taskforge.exe jobs create examples/hello_world_job.yaml
+       .\.venv\Scripts\taskforge.exe pipelines create examples/artifact-pipeline.yaml
+     Export YAML definition:
+       .\.venv\Scripts\taskforge.exe jobs yaml job-hello-world
+       .\.venv\Scripts\taskforge.exe pipelines yaml artifact-demo
+
+6. User and access management
    Administrators can provision dynamic team users with distinct roles and project scopes.
    Three roles are enforced across all endpoints and UI actions:
      - admin: Full control over job/pipeline authoring, deployments, user management, and audit records.
@@ -80,7 +105,7 @@ TaskForge 0.2 - Installation, validation, and operations
      Revoke user:
        .\.venv\Scripts\taskforge.exe users delete <username>
 
-6. Docker Compose API/worker/PostgreSQL
+7. Docker Compose API/worker/PostgreSQL
    Run init first. In PowerShell set a long URL-safe password without printing it:
      $env:POSTGRES_PASSWORD = .\.venv\Scripts\taskforge.exe token
      docker compose -f docker/docker-compose.yml up --build -d
@@ -94,8 +119,8 @@ TaskForge 0.2 - Installation, validation, and operations
    The default Compose worker can run allowlisted HTTP jobs, or trusted Python/shell
    workloads if explicitly enabled. Both services share the artifacts volume.
 
-7. First artifact pipeline and execution
-   Use examples/artifact-pipeline.json in the dashboard Pipelines JSON editor.
+8. First artifact pipeline and execution
+   Use examples/artifact-pipeline.yaml in the dashboard Pipelines editor or with "taskforge apply".
    It requires Docker on the worker. Save, queue (with optional runtime parameters),
    and inspect the two step results in the visual DAG workflow view.
    Steps automatically receive standard CI environment variables (CI=true,
