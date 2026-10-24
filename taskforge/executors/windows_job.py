@@ -1,7 +1,11 @@
 """Windows Job Objects terminate descendants without spawning a cleanup command."""
 
 import ctypes
+import sys
 from ctypes import wintypes
+
+if sys.platform != "win32":
+    raise ImportError("Windows Job Objects are only available on Windows")
 
 
 class BasicLimit(ctypes.Structure):
