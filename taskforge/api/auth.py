@@ -1,3 +1,4 @@
+import hashlib
 import hmac
 from dataclasses import dataclass
 
@@ -29,6 +30,12 @@ async def authenticate(request: Request) -> Principal:
         for entry in request.app.state.settings.tokens:
             if hmac.compare_digest(str(entry["token"]).encode(), token.encode()):
                 return Principal(entry["name"], entry["role"], entry["projects"])
+        db = getattr(request.app.state, "db", None)
+        if db is not None:
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            doc = await db.get("user_token", token_hash)
+            if doc:
+                return Principal(doc["name"], doc["role"], doc["projects"])
     raise HTTPException(
         401, "A valid access token is required", headers={"WWW-Authenticate": "Bearer"}
     )

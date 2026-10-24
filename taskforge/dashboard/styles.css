@@ -637,6 +637,48 @@ tbody tr:hover {
   background: var(--panel2);
 }
 
+.badge.admin {
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(168, 85, 247, 0.4);
+}
+
+.badge.operator {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.badge.viewer {
+  color: var(--green);
+  background: var(--green-bg);
+  border-color: var(--green-border);
+}
+
+.badge.db {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.badge.config {
+  color: var(--text-muted);
+  background: var(--panel2);
+  border-color: var(--line);
+}
+
+:root[data-theme="light"] .badge.admin {
+  color: #7e22ce;
+  background: rgba(126, 34, 206, 0.1);
+  border-color: rgba(126, 34, 206, 0.25);
+}
+
+:root[data-theme="light"] .badge.db {
+  color: #0369a1;
+  background: rgba(3, 105, 161, 0.08);
+  border-color: rgba(3, 105, 161, 0.2);
+}
+
 .empty {
   padding: 60px 24px;
   text-align: center;
@@ -767,6 +809,70 @@ tbody tr:hover {
   border-bottom: 1px solid var(--red-border);
   font-weight: 550;
   font-size: 13px;
+}
+
+.roles-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.role-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+  transition: var(--transition);
+}
+
+.role-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-light);
+}
+
+.token-reveal-card {
+  padding: 18px 20px;
+  background: var(--panel2);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  margin: 16px 0;
+}
+
+.token-reveal-code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+  user-select: all;
+  margin: 10px 0;
+  border: 1px dashed var(--line);
+}
+
+:root[data-theme="light"] .token-reveal-code {
+  background: #ffffff;
+  color: var(--accent-hover);
+  border-color: var(--accent-border);
+}
+
+.token-preview-mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 2px 6px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.project-tag {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text);
 }
 
 footer {
@@ -1198,7 +1304,7 @@ input[readonly] {
   .stat-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  .grid-2 {
+  .grid-2, .roles-grid {
     grid-template-columns: 1fr;
   }
   .detail-grid {

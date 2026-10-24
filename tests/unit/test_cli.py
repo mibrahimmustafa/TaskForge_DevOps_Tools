@@ -26,3 +26,5 @@ def test_api_cli_requires_token(monkeypatch):
     monkeypatch.delenv("TASKFORGE_API_TOKEN", raising=False)
     result = CliRunner().invoke(app, ["jobs", "list"])
     assert result.exit_code != 0 and "TASKFORGE_API_TOKEN" in result.output
+    user_result = CliRunner().invoke(app, ["users", "list"])
+    assert user_result.exit_code != 0 and "TASKFORGE_API_TOKEN" in user_result.output

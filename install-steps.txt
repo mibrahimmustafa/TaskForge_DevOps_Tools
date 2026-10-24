@@ -59,7 +59,28 @@ TaskForge 0.2 - Installation, validation, and operations
      Configure TASKFORGE_ALLOWED_HTTP_HOSTS='["api.example.com"]'.
      Redirects and ambient proxy environment settings are not followed.
 
-5. Docker Compose API/worker/PostgreSQL
+5. User and access management
+   Administrators can provision dynamic team users with distinct roles and project scopes.
+   Three roles are enforced across all endpoints and UI actions:
+     - admin: Full control over job/pipeline authoring, deployments, user management, and audit records.
+     - operator: Execution privileges (trigger runs, pause/resume jobs, cancel, deployment promotion).
+     - viewer: Read-only visibility into pipeline graphs, execution timeline, streaming logs, and artifacts.
+
+   Via Dashboard:
+     Navigate to 'Users & access' in the sidebar as an admin, click '+ Add user', specify the
+     username, role, and project scopes ('*' for all or comma-separated project IDs).
+     Copy the generated token immediately from the confirmation dialog.
+
+   Via CLI:
+     Set $env:TASKFORGE_API_TOKEN to your admin token.
+     List users:
+       .\.venv\Scripts\taskforge.exe users list
+     Add user:
+       .\.venv\Scripts\taskforge.exe users create <username> --role operator --projects "default,staging"
+     Revoke user:
+       .\.venv\Scripts\taskforge.exe users delete <username>
+
+6. Docker Compose API/worker/PostgreSQL
    Run init first. In PowerShell set a long URL-safe password without printing it:
      $env:POSTGRES_PASSWORD = .\.venv\Scripts\taskforge.exe token
      docker compose -f docker/docker-compose.yml up --build -d
@@ -73,7 +94,7 @@ TaskForge 0.2 - Installation, validation, and operations
    The default Compose worker can run allowlisted HTTP jobs, or trusted Python/shell
    workloads if explicitly enabled. Both services share the artifacts volume.
 
-6. First artifact pipeline and execution
+7. First artifact pipeline and execution
    Use examples/artifact-pipeline.json in the dashboard Pipelines JSON editor.
    It requires Docker on the worker. Save, queue (with optional runtime parameters),
    and inspect the two step results in the visual DAG workflow view.
@@ -83,7 +104,7 @@ TaskForge 0.2 - Installation, validation, and operations
    Download or preview the final artifact directly from the execution dialog.
    Use the terminal bar to toggle auto-scroll or copy the execution log.
 
-7. Source triggers
+8. Source triggers
    Set TASKFORGE_GITHUB_REPOSITORIES to allowed public owner/repository names.
    Configure a GitHub webhook to https://YOUR_HOST/api/triggers/github, JSON payload,
    push events only, and the same TASKFORGE_GITHUB_SECRET on TaskForge.
@@ -93,7 +114,7 @@ TaskForge 0.2 - Installation, validation, and operations
    Custom job webhooks require a >=32-character secret, X-Taskforge-Secret, and
    Idempotency-Key headers at POST /api/triggers/webhook/JOB_ID.
 
-8. Docker and Kubernetes promotion
+9. Docker and Kubernetes promotion
    Copy the target examples from README.md and configure actual host/namespace/context,
    health URL, image repository, and require_approval in TASKFORGE_DEPLOYMENT_TARGETS.
    Supply the same target configuration to API and workers.
@@ -112,7 +133,7 @@ TaskForge 0.2 - Installation, validation, and operations
    The lock is intentionally retained for interrupted deployments to prevent overlapping
    remote side effects. Lease fencing alone cannot fence Docker/Kubernetes operations.
 
-9. Legacy upgrade
+10. Legacy upgrade
    Stop old API/scheduler processes. Back up the original SQLite file and old logs.
    Configure the destination storage URL and run:
      .\.venv\Scripts\taskforge.exe migrate-legacy PATH_TO_OLD_DATABASE
@@ -124,7 +145,7 @@ TaskForge 0.2 - Installation, validation, and operations
    Version 0.2 initializes schema version 1; unknown versions fail startup.
    There is no automated downgrade or incremental schema migration framework yet.
 
-10. Tests
+11. Tests
     .\.venv\Scripts\ruff.exe check .
     .\.venv\Scripts\ruff.exe format --check .
     .\.venv\Scripts\mypy.exe taskforge
@@ -152,7 +173,7 @@ TaskForge 0.2 - Installation, validation, and operations
       Remove-Item Env:TASKFORGE_DOCKER_TESTS
     Tests pull a public Python image and create/delete only their uniquely named containers.
 
-11. GitHub release setup
+12. GitHub release setup
     Enable Actions and package write permissions for the repository.
     Configure the "release" environment with required reviewers and protected tags.
     Push a version tag only when pyproject.toml matches (for example v0.2.0).
@@ -160,7 +181,7 @@ TaskForge 0.2 - Installation, validation, and operations
     Configure real staging/production promotion separately using TaskForge targets.
     A repository push is not authorization to deploy to a production target.
 
-12. Operational checks
+13. Operational checks
     /health: API liveness. /ready: database connectivity.
     /metrics: bearer-authenticated admin metrics from persisted run states.
     Run lost: inspect side effects, then submit a new reviewed run.

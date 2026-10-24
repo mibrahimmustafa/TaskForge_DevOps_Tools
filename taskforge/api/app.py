@@ -10,7 +10,16 @@ from fastapi.staticfiles import StaticFiles
 
 from taskforge.api.auth import validate_tokens
 from taskforge.api.limits import BodyLimitMiddleware
-from taskforge.api.routers import deployments, jobs, pipelines, plugins, runs, system, triggers
+from taskforge.api.routers import (
+    deployments,
+    jobs,
+    pipelines,
+    plugins,
+    runs,
+    system,
+    triggers,
+    users,
+)
 from taskforge.core.config import Settings, get_settings
 from taskforge.core.logging import setup_logging
 from taskforge.core.scheduler import TaskScheduler
@@ -83,7 +92,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     app.add_middleware(BodyLimitMiddleware)
 
     app.include_router(system.router)
-    for module in (jobs, runs, pipelines, deployments, triggers, plugins):
+    for module in (jobs, runs, pipelines, deployments, triggers, plugins, users):
         app.include_router(module.router, prefix="/api")
     dashboard = Path(__file__).resolve().parents[1] / "dashboard"
     app.mount("/dashboard", StaticFiles(directory=dashboard, html=True), name="dashboard")

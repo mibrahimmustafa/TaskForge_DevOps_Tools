@@ -11,11 +11,11 @@ It supports **artifact-only pipelines, Docker deployment, and Kubernetes deploym
 - Standard CI/CD runner environment variables (`CI=true`, `TASKFORGE_PROJECT`, `TASKFORGE_RUN_ID`, `TASKFORGE_STEP`, `TASKFORGE_WORKSPACE`, `TASKFORGE_COMMIT`) and dynamic runtime parameters.
 - Atomic queue claims, unique execution fences, worker heartbeats, resource locks, timeout/cancellation cleanup, durable standalone-job retries, and persisted attempts.
 - Docker, HTTP, Python, and shell executors. Host execution is disabled by default.
-- Project-scoped viewer/operator/admin bearer tokens; protected logs and artifacts; audit records; secret reference injection and log redaction.
+- Project-scoped viewer/operator/admin bearer tokens; dynamic database-persisted user management with secure token generation, rotation, and revocation; protected logs and artifacts; audit records; secret reference injection and log redaction.
 - Content-addressed local artifacts with SHA-256 and a 50 MiB limit per file, with authenticated in-modal text preview for logs and manifests.
 - Docker and Kubernetes adapters with immutable image validation, environment serialization, approvals, stale-build prevention, explicit rollback, and recovery reconciliation.
 - Transactional notification queue with up to five HTTP delivery attempts and an idempotency key.
-- Responsive dark/light dashboard: visual DAG workflow graphs, overview pulse, jobs, pipelines, run history with live streaming terminal and copy controls, deployments, integrations, and audit. Displays real persisted data and clear errors.
+- Responsive dark/light dashboard: visual DAG workflow graphs, overview pulse, jobs, pipelines, run history with live streaming terminal and copy controls, deployments, integrations, users & access management, and audit trail. Displays real persisted data and clear errors.
 - GitHub Actions quality checks, Windows/Linux test matrix, PostgreSQL integration, Chromium UI tests, container smoke testing, and gated tag releases to GHCR.
 
 This release is intended for trusted teams. It is not a hostile-code multi-tenant sandbox. Shell/Python can access their runner's host; Docker access also grants substantial control of the host. Keep execution workers separate from the API and isolate runners by trust boundary.
@@ -101,6 +101,35 @@ Repository pipelines specify `repository: "owner/repo"` and `branch`. Manual run
 
 Docker job containers have no network, dropped capabilities, bounded CPU/memory/PIDs, and a workspace mount. Build network access is not a job-supplied Docker flag. Prepare dependency images beforehand, or use a separately isolated trusted build runner. Artifact-only pipelines complete after verification and publication; they need no deployment target.
 
+## Users and role-based access control (RBAC)
+
+TaskForge supports dynamic user provisioning stored in SQLite/PostgreSQL with SHA-256 hashed token lookup, alongside bootstrap static credentials in `.taskforge/config.env`.
+
+Access is governed by three hierarchical roles and explicit project scopes:
+
+| Role | Permissions |
+| --- | --- |
+| **`admin`** | Full authoring and operational privileges: create/edit/delete jobs and pipelines, manage deployments and approvals, provision team users, rotate/revoke access tokens, and inspect audit records. |
+| **`operator`** | Operational control: trigger pipeline executions, pass runtime parameters, pause/resume jobs, cancel running jobs, and request deployments. Cannot modify job/pipeline definitions or manage users. |
+| **`viewer`** | Read-only visibility: inspect pipeline DAGs, execution history, live streaming logs, and download/preview build artifacts. |
+
+### Managing users via Dashboard or CLI
+
+- **Dashboard**: As an `admin`, navigate to **Users & access** in the sidebar. Click **+ Add user**, assign their role and project scope (`*` for all projects or a comma-separated list of project IDs), and copy the auto-generated 48-byte token. Generated access tokens are presented once upon creation.
+- **CLI**:
+  ```powershell
+  $env:TASKFORGE_API_TOKEN = "your-admin-token"
+
+  # List users
+  .\.venv\Scripts\taskforge.exe users list
+
+  # Create an operator user
+  .\.venv\Scripts\taskforge.exe users create alice --role operator --projects "backend,web"
+
+  # Revoke a user
+  .\.venv\Scripts\taskforge.exe users delete alice
+  ```
+
 ## Deployment targets
 
 Configure both API and workers with the same target map. An example with all deployment adapters:
@@ -166,6 +195,10 @@ Interactive API schemas are at `/docs`. Supply `Authorization: Bearer <token>` f
 | `GET /api/runs/{id}/artifacts/{sha256}/preview` | Authenticated text preview (up to 256 KB) |
 | `POST /api/runs/{id}/cancel` | Queued/running cancellation |
 | `POST /api/deployments`, `.../{id}/approve`, `.../{id}/reconcile` | Deployment lifecycle |
+| `GET/POST /api/users` | List users and provision new user with role (`admin`, `operator`, `viewer`) and project scopes |
+| `PATCH /api/users/{name}` | Update role or project scopes for a managed user |
+| `POST /api/users/{name}/token` | Regenerate access token for a managed user |
+| `DELETE /api/users/{name}` | Revoke and delete a managed user account |
 | `GET /api/audit`, `GET /metrics` | Administrator audit records and persisted-state Prometheus metrics |
 
 Cron accepts five or six fields and an IANA timezone. Intervals use positive expressions such as `every 5m`. One-shot timestamps require an offset, e.g. `2026-12-01T10:00:00+03:00`. Missed recurring ticks coalesce to one execution. Pausing a definition does not cancel already queued/running work.

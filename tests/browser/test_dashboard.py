@@ -148,7 +148,53 @@ def test_mobile_layout_keyboard_and_literal_untrusted_text(browser, live_server)
     page.keyboard.press("Escape")
     assert not page.get_by_role("dialog").is_visible()
     Path("test-results").mkdir(exist_ok=True)
-    page.screenshot(path="test-results/mobile-jobs.png", full_page=True)
     page.get_by_role("button", name="Sign out").click()
     assert page.get_by_label("Access token").input_value() == ""
+    page.close()
+
+
+def test_user_management_ui_workflow(browser, live_server):
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(live_server)
+    page.get_by_label("Access token").fill(TOKEN)
+    page.get_by_role("button", name="Open workspace").click()
+    page.get_by_role("heading", name="Overview", exact=True).wait_for()
+
+    # Navigate to Users page
+    page.get_by_role("link", name="Users & access", exact=True).click()
+    page.get_by_role("heading", name="Users & access", exact=True).wait_for()
+
+    # Open Add User dialog
+    page.get_by_role("button", name="+ Add user", exact=True).click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+    page.get_by_label("Username", exact=True).fill("sarah-engineer")
+    page.get_by_label("Role", exact=True).select_option("operator")
+    page.get_by_label("Project access", exact=True).fill("*")
+    dialog.get_by_role("button", name="Create user & generate token", exact=True).click()
+
+    # Verify generated token modal
+    page.get_by_role("heading", name="Access token generated", exact=True).wait_for()
+    assert "sarah-engineer" in page.get_by_role("dialog").text_content()
+    page.get_by_role("button", name="📋 Copy token", exact=True).wait_for()
+    Path("test-results").mkdir(exist_ok=True)
+    page.screenshot(path="test-results/desktop-user-token.png", full_page=True)
+    page.get_by_role("button", name="Done", exact=True).click()
+
+    # Verify user row exists
+    row = page.get_by_role("row").filter(has_text="sarah-engineer")
+    row.wait_for()
+    assert "operator" in row.text_content()
+    assert "Database" in row.text_content()
+    page.screenshot(path="test-results/desktop-users.png", full_page=True)
+
+    # Test revoke action
+    row.get_by_role("button", name="Revoke", exact=True).click()
+    page.get_by_role("dialog").get_by_role("button", name="Revoke access", exact=True).click()
+    page.wait_for_timeout(1000)
+    assert page.get_by_role("row").filter(has_text="sarah-engineer").count() == 0
+
+    assert not errors
     page.close()

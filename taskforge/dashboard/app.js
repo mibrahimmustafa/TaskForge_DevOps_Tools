@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {token:'',session:null,page:'overview',jobs:[],pipelines:[],runs:[],targets:[],plugins:[],stats:{},audit:[],query:'',offset:0,refreshing:false};
+const state = {token:'',session:null,page:'overview',jobs:[],pipelines:[],runs:[],targets:[],plugins:[],users:[],stats:{},audit:[],query:'',offset:0,refreshing:false};
 const pages = {
   overview:['Overview','Workspace pulse','A clear view of your automation and recent execution.','◈'],
   jobs:['Jobs','Scheduled automation','Reusable tasks with explicit schedules and execution policies.','▣'],
@@ -8,6 +8,7 @@ const pages = {
   runs:['Run history','Execution timeline','Real results, retry attempts, logs, and build artifacts.','◷'],
   deployments:['Deployments','Release control','Promote a verified image digest to an approved environment.','↗'],
   integrations:['Integrations','Connected capabilities','Administrator-configured adapters and capabilities.','◇'],
+  users:['Users & access','Access management','Manage team members, roles, and project access tokens.','👥'],
   audit:['Audit trail','Accountability','Configuration changes and execution decisions.','≡']
 };
 const terminal = new Set(['success','failed','timed_out','cancelled','lost']);
@@ -160,7 +161,7 @@ window.addEventListener('keydown',e=>{
 function buildNavigation(){
   $('navigation').replaceChildren(
     ...Object.entries(pages)
-      .filter(([key])=>key!=='audit'||isAdmin())
+      .filter(([key])=>!['audit','users'].includes(key)||isAdmin())
       .map(([key,page])=>el('a',{href:'#'+key,className:'nav-link','data-page':key},
         el('span',{className:'nav-symbol','aria-hidden':true},page[3]),
         page[0]
@@ -169,14 +170,14 @@ function buildNavigation(){
 }
 
 function navigate(page){
-  state.page=pages[page]&&(page!=='audit'||isAdmin())?page:'overview';
+  state.page=pages[page]&&(!['audit','users'].includes(page)||isAdmin())?page:'overview';
   state.query='';
   state.offset=0;
   render();
   document.querySelectorAll('[data-page]').forEach(link=>
     link.setAttribute('aria-current',link.dataset.page===state.page?'page':'false')
   );
-  if(state.page==='audit')refresh();
+  if(['audit','users'].includes(state.page))refresh();
 }
 
 async function refresh(notify=false){
@@ -194,6 +195,7 @@ async function refresh(notify=false){
     ]);
     Object.assign(state,{jobs,pipelines,runs,stats,targets,plugins});
     if(isAdmin()&&state.page==='audit')state.audit=await api('/audit');
+    if(isAdmin()&&state.page==='users')state.users=await api('/users');
     $('connection-error').hidden=true;
     $('connection').textContent=stats.workers_online
       ?'Connected · '+stats.workers_online+' worker(s) online'
@@ -256,6 +258,7 @@ function render(){
   if(['jobs','overview'].includes(state.page)&&isAdmin())actions.push(button('+ Create job',()=>editJob(),'primary'));
   if(state.page==='pipelines'&&isAdmin())actions.push(button('+ Create pipeline',()=>editPipeline(),'primary'));
   if(state.page==='deployments'&&canOperate())actions.push(button('+ Request deployment',()=>deploymentForm(),'primary'));
+  if(state.page==='users'&&isAdmin())actions.push(button('+ Add user',()=>createUserForm(),'primary'));
   $('page-actions').replaceChildren(...actions);
   renderContent();
 }
@@ -263,7 +266,7 @@ function render(){
 function renderContent(){
   const content=$('content'),focused=document.activeElement?.id==='filter',position=focused?document.activeElement.selectionStart:0;
   content.replaceChildren();
-  ({overview,jobs:jobsPage,pipelines:pipelinesPage,runs:runsPage,deployments:deploymentsPage,integrations:integrationsPage,audit:auditPage})[state.page](content);
+  ({overview,jobs:jobsPage,pipelines:pipelinesPage,runs:runsPage,deployments:deploymentsPage,integrations:integrationsPage,users:usersPage,audit:auditPage})[state.page](content);
   if(focused&&$('filter')){$('filter').focus();$('filter').setSelectionRange(position,position);}
 }
 
@@ -420,6 +423,70 @@ function auditPage(content){
   ):empty('No audit events yet','Configuration and execution actions will appear here.')));
 }
 
+function usersPage(content){
+  const rolesInfo=el('div',{className:'roles-grid'},
+    el('div',{className:'role-card'},
+      el('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:6px;'},
+        el('span',{className:'badge admin'},'admin'),
+        el('strong',{},'Administrator')
+      ),
+      el('p',{className:'hint',style:'margin:0;'},'Full control over definitions, pipelines, deployments, plugins, audit trail, and user access.')
+    ),
+    el('div',{className:'role-card'},
+      el('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:6px;'},
+        el('span',{className:'badge operator'},'operator'),
+        el('strong',{},'Operator')
+      ),
+      el('p',{className:'hint',style:'margin:0;'},'Operational execution, manual runs, pausing/resuming jobs, cancellation, and deployment promotion.')
+    ),
+    el('div',{className:'role-card'},
+      el('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:6px;'},
+        el('span',{className:'badge viewer'},'viewer'),
+        el('strong',{},'Viewer')
+      ),
+      el('p',{className:'hint',style:'margin:0;'},'Read-only visibility for definitions, real execution timelines, live streaming logs, and artifacts.')
+    )
+  );
+
+  const filtered=(state.users||[]).filter(user=>{
+    const q=state.query.toLowerCase().trim();
+    if(!q)return true;
+    return user.name.toLowerCase().includes(q)||
+           user.role.toLowerCase().includes(q)||
+           (user.projects||[]).some(p=>p.toLowerCase().includes(q))||
+           (user.source||'').toLowerCase().includes(q);
+  });
+
+  const rows=filtered.map(user=>el('tr',{},
+    nameCell(user.name,user.created_by?'Created by '+user.created_by+(user.created?' · '+date(user.created):''):'System configuration'),
+    cell(el('span',{className:'badge '+user.role},user.role)),
+    cell(el('span',{className:'project-tag'},(user.projects||[]).join(', '))),
+    cell(el('span',{className:'badge '+(user.source==='db'?'db':'config')},user.source==='db'?'Database':'Config file')),
+    cell(el('code',{className:'token-preview-mono'},user.token_preview||'••••••••')),
+    cell(
+      user.source==='db'
+        ? el('div',{style:'display:flex;gap:6px;justify-content:flex-end;'},
+            button('Regenerate token',()=>regenerateUserToken(user),'quiet'),
+            button('Revoke',()=>deleteUserDialog(user),'danger')
+          )
+        : el('small',{className:'muted'},'Static (read-only)')
+    )
+  ));
+
+  content.append(
+    rolesInfo,
+    panel('Team members & access tokens',
+      el('div',{},
+        filterToolbar('Filter users by name, role, or project…'),
+        filtered.length
+          ? table(['User / Identity','Role','Projects','Source','Token hint','Actions'],rows)
+          : empty('No matching users found','Try adjusting your search filter or add a new user.')
+      ),
+      (state.users||[]).length+' registered user(s)'
+    )
+  );
+}
+
 function dialog(title,eyebrow='CONFIGURATION'){
   if($('editor').open)$('editor').close();
   $('dialog-title').textContent=title;
@@ -445,8 +512,8 @@ function saveForm(form,callback,label='Save changes'){
     error.textContent='';
     submit.disabled=true;
     try{
-      await callback(new FormData(form));
-      $('editor').close();
+      const res=await callback(new FormData(form));
+      if(res!==false)$('editor').close();
       await refresh();
     }catch(failure){
       error.textContent=failure.message;
@@ -592,6 +659,92 @@ function reviewDeployment(run){
     await api('/deployments/'+run.id+'/approve',{method:'POST'});
     toast('Deployment approved and queued');
   },'Approve deployment'));
+}
+
+function createUserForm(){
+  const content=dialog('Add user','USER MANAGEMENT');
+  const form=el('form',{},
+    el('div',{className:'form-grid'},
+      field('Username','name','',{required:true,placeholder:'e.g. devops-bot or alex'}),
+      field('Role','role','operator',{choices:[
+        ['admin','Admin · Full management & authoring'],
+        ['operator','Operator · Trigger pipelines & deployments'],
+        ['viewer','Viewer · Read-only logs & runs']
+      ]}),
+      field('Project access','projects','*',{required:true,hint:'Use * for all projects, or enter comma-separated project names.'}),
+      field('Custom token (optional)','token','',{type:'password',hint:'Leave blank to auto-generate a secure 48-byte token. If provided, min 32 chars.'})
+    )
+  );
+  content.append(
+    el('div',{className:'info-strip'},'Generated access tokens are shown once upon creation. Store the token in a secure credentials manager.'),
+    saveForm(form,async data=>{
+      const name=data.get('name').trim();
+      const role=data.get('role');
+      const rawProj=data.get('projects').trim();
+      const rawToken=data.get('token').trim();
+      const projects=rawProj.split(',').map(p=>p.trim()).filter(Boolean);
+      const result=await api('/users',{
+        method:'POST',
+        body:JSON.stringify({
+          name,
+          role,
+          projects:projects.length?projects:['*'],
+          token:rawToken||null
+        })
+      });
+      showTokenModal(result.name,result.role,result.token);
+      return false;
+    },'Create user & generate token')
+  );
+}
+
+function showTokenModal(username,role,token){
+  const content=dialog('Access token generated','CREDENTIALS CREATED');
+  const copyBtn=el('button',{type:'button',className:'primary'},'📋 Copy token');
+  copyBtn.onclick=async()=>{
+    try{
+      await navigator.clipboard.writeText(token);
+      copyBtn.textContent='✓ Copied to clipboard!';
+      setTimeout(()=>{copyBtn.textContent='📋 Copy token';},3000);
+      toast('Token copied to clipboard');
+    }catch(_){
+      toast('Could not copy automatically; please copy manually.',true);
+    }
+  };
+  content.append(
+    el('div',{className:'token-reveal-card'},
+      el('strong',{},'User: '+username+' · Role: '+role),
+      el('p',{className:'hint',style:'margin-top:6px;'},'Make sure to copy your access token now. You will not be able to see it again!'),
+      el('div',{className:'token-reveal-code',tabIndex:0,'aria-label':'Access token'},token),
+      el('div',{style:'display:flex;gap:8px;margin-top:14px;'},
+        copyBtn,
+        button('Done',()=>$('editor').close(),'quiet')
+      )
+    )
+  );
+}
+
+function regenerateUserToken(user){
+  const content=dialog('Regenerate access token','ROTATE CREDENTIALS');
+  content.append(
+    el('p',{},'Are you sure you want to regenerate the access token for ',el('strong',{},user.name),'? The user’s current token will stop working immediately.'),
+    saveForm(el('form'),async()=>{
+      const result=await api('/users/'+encodeURIComponent(user.name)+'/token',{method:'POST'});
+      showTokenModal(result.name,result.role,result.token);
+      return false;
+    },'Regenerate token')
+  );
+}
+
+function deleteUserDialog(user){
+  const content=dialog('Revoke user access','CONFIRM REVOCATION');
+  content.append(
+    el('p',{},'Are you sure you want to revoke and delete ',el('strong',{},user.name),'? All existing sessions and operations for this token will be permanently revoked.'),
+    saveForm(el('form'),async()=>{
+      await api('/users/'+encodeURIComponent(user.name),{method:'DELETE'});
+      toast('User '+user.name+' revoked');
+    },'Revoke access')
+  );
 }
 
 async function openRun(id){

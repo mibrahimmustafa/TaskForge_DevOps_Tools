@@ -11,9 +11,11 @@ from taskforge.core.config import get_settings
 
 app = typer.Typer(help="TaskForge pipeline operations")
 jobs_app = typer.Typer(help="Manage jobs through the authenticated API")
+users_app = typer.Typer(help="Manage users and access tokens through the authenticated API")
 server_app = typer.Typer(help="Run the API and dashboard")
 worker_app = typer.Typer(help="Run an independent execution worker")
 app.add_typer(jobs_app, name="jobs")
+app.add_typer(users_app, name="users")
 app.add_typer(server_app, name="server")
 app.add_typer(worker_app, name="worker")
 
@@ -89,6 +91,34 @@ def pause_job(job_id: str):
 @jobs_app.command("resume")
 def resume_job(job_id: str):
     request("POST", f"/jobs/{job_id}/resume")
+
+
+@users_app.command("list")
+def list_users():
+    """List all registered and configured users."""
+    request("GET", "/users")
+
+
+@users_app.command("create")
+def create_user(
+    name: str = typer.Argument(..., help="Username"),
+    role: str = typer.Option("operator", help="User role (admin, operator, viewer)"),
+    projects: str = typer.Option("*", help="Comma-separated project list or *"),
+    token: str | None = typer.Option(None, help="Custom access token (min 32 chars)"),
+):
+    """Add a new user with an assigned role and project scopes."""
+    proj_list = [p.strip() for p in projects.split(",") if p.strip()]
+    request(
+        "POST",
+        "/users",
+        {"name": name, "role": role, "projects": proj_list, "token": token},
+    )
+
+
+@users_app.command("delete")
+def delete_user(name: str = typer.Argument(..., help="Username to delete")):
+    """Revoke and delete a user account and token."""
+    request("DELETE", f"/users/{name}")
 
 
 @app.command("token")

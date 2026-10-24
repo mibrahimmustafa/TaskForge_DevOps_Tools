@@ -21,12 +21,13 @@ Do not describe planned features as implemented. Do not substitute simulated job
 - Release image digests linked to successful-build release.json artifacts. Separate approval identity when required.
 - Environment serialization, health/rollout verification, rollback attempts, stale-build rejection, and explicit reconciliation after interrupted deployment.
 - Terminal run state and completion notification queue committed in one transaction.
+- Dynamic database user provisioning and authentication with role hierarchy (admin, operator, viewer), project scoping, token generation, rotation, and revocation.
 
 ## User experience
 
 Maintain responsive desktop/mobile layouts, dark/light themes, labeled forms, keyboard focus, Escape dismissal, safe text rendering, clear empty/error/loading states, and role-aware controls. Display online-worker status so queued work is understandable. Tokens remain in browser memory only.
 
-Job editing must preserve optimistic versions and avoid overwriting concurrent changes. Deletion confirms intent and retains history. Visual pipeline dependency DAGs, live streaming logs with auto-scroll and copy controls, attempts, artifact downloads and inline previews, approval, explicit rollback, and reconciliation must have usable entry points.
+Job editing must preserve optimistic versions and avoid overwriting concurrent changes. Deletion confirms intent and retains history. Visual pipeline dependency DAGs, live streaming logs with auto-scroll and copy controls, attempts, artifact downloads and inline previews, user and token administration with secure copy dialogs, approval, explicit rollback, and reconciliation must have usable entry points.
 
 ## Validation and delivery
 

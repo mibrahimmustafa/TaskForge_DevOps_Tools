@@ -195,3 +195,118 @@ async def test_streaming_request_size_is_bounded(client):
 
     response = await client.post("/api/jobs", content=oversized_body())
     assert response.status_code == 413
+
+
+async def test_user_management_lifecycle_and_role_enforcement(client):
+    # 1. Unauthenticated and non-admin checks
+    assert (await client.get("/api/users", headers={"Authorization": ""})).status_code == 401
+    assert (
+        await client.get("/api/users", headers={"Authorization": "Bearer " + VIEWER})
+    ).status_code == 403
+
+    # 2. Admin lists users (starts with static config tokens)
+    users_res = await client.get("/api/users")
+    assert users_res.status_code == 200
+    names = [u["name"] for u in users_res.json()]
+    assert "admin" in names
+    assert "viewer" in names
+    assert all(u["source"] == "config" for u in users_res.json())
+
+    # 3. Create operator user with specific project scope
+    create_payload = {
+        "name": "charlie-operator",
+        "role": "operator",
+        "projects": ["default"],
+    }
+    create_res = await client.post("/api/users", json=create_payload)
+    assert create_res.status_code == 200
+    data = create_res.json()
+    assert data["name"] == "charlie-operator"
+    assert data["role"] == "operator"
+    assert data["projects"] == ["default"]
+    assert data["source"] == "db"
+    assert len(data["token"]) >= 32
+    operator_token = data["token"]
+
+    # 4. Duplicate creation must fail (409 Conflict)
+    dup_res = await client.post("/api/users", json=create_payload)
+    assert dup_res.status_code == 409
+
+    # 5. Invalid project format must fail (422)
+    invalid_res = await client.post(
+        "/api/users", json={"name": "bad-user", "role": "viewer", "projects": ["invalid project!"]}
+    )
+    assert invalid_res.status_code == 422
+
+    # 6. Verify authentication with new operator token
+    session_res = await client.get(
+        "/api/session", headers={"Authorization": "Bearer " + operator_token}
+    )
+    assert session_res.status_code == 200
+    assert session_res.json() == {
+        "name": "charlie-operator",
+        "role": "operator",
+        "projects": ["default"],
+    }
+
+    # Operator cannot create jobs (requires admin)
+    assert (
+        await client.post(
+            "/api/jobs",
+            json=job_payload(id="operator-forbidden"),
+            headers={"Authorization": "Bearer " + operator_token},
+        )
+    ).status_code == 403
+
+    # Operator cannot access /api/users
+    assert (
+        await client.get("/api/users", headers={"Authorization": "Bearer " + operator_token})
+    ).status_code == 403
+
+    # 7. Update user role to viewer via PATCH
+    patch_res = await client.patch(
+        "/api/users/charlie-operator",
+        json={"role": "viewer"},
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["role"] == "viewer"
+
+    # Authenticate again with same token -> role is now viewer!
+    session_res2 = await client.get(
+        "/api/session", headers={"Authorization": "Bearer " + operator_token}
+    )
+    assert session_res2.json()["role"] == "viewer"
+
+    # 8. Regenerate token
+    regen_res = await client.post("/api/users/charlie-operator/token")
+    assert regen_res.status_code == 200
+    new_token = regen_res.json()["token"]
+    assert new_token != operator_token
+
+    # Old token must now be rejected (401)
+    assert (
+        await client.get("/api/session", headers={"Authorization": "Bearer " + operator_token})
+    ).status_code == 401
+
+    # New token is accepted
+    assert (
+        await client.get("/api/session", headers={"Authorization": "Bearer " + new_token})
+    ).status_code == 200
+
+    # 9. Delete safety guards:
+    # Cannot delete self
+    assert (await client.delete("/api/users/admin")).status_code == 400
+    # Cannot delete static config user
+    assert (await client.delete("/api/users/viewer")).status_code == 400
+    # Cannot delete non-existent user
+    assert (await client.delete("/api/users/non-existent-user")).status_code == 404
+
+    # 10. Delete the database user
+    delete_res = await client.delete("/api/users/charlie-operator")
+    assert delete_res.status_code == 200
+    assert delete_res.json() == {"success": True}
+
+    # Token is now revoked
+    assert (
+        await client.get("/api/session", headers={"Authorization": "Bearer " + new_token})
+    ).status_code == 401

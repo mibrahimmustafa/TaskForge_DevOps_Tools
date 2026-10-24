@@ -19,6 +19,7 @@
         "run history",
         "deployments",
         "integrations",
+        "users",
         "audit"
       ],
       "authentication": "Bearer token kept only in browser memory",
@@ -46,6 +47,7 @@
         "admin"
       ],
       "authorization": "Project scopes checked on definitions, runs, logs, artifacts, and deployment requests",
+      "user_management": "Admin-controlled user provisioning with role hierarchy (admin, operator, viewer), project scoping, token generation, rotation, and revocation",
       "request_body_limit_bytes": 1048576
     },
     "storage": {
@@ -185,7 +187,7 @@
     "production_deploy": "Requires configured real target and separate approval"
   },
   "known_limits": [
-    "Static tokens; OIDC pending",
+    "Dynamic database tokens and static config tokens supported; OIDC/SSO federated identity pending",
     "Local shared artifacts; no automatic retention",
     "No private repository authentication or GitHub commit status reporting",
     "No event bus trigger",
