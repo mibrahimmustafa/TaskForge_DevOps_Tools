@@ -228,6 +228,8 @@ def test_yaml_task_workflow(browser, live_server):
     page.locator("#btn-validate-yaml").click()
     page.locator(".yaml-validation-success").wait_for()
     assert "Valid job" in page.locator(".yaml-validation-success").text_content()
+    Path("test-results").mkdir(exist_ok=True)
+    page.screenshot(path="test-results/desktop-yaml-editor.png", full_page=True)
 
     # Apply task
     page.locator("#btn-apply-yaml").click()
@@ -242,6 +244,7 @@ def test_yaml_task_workflow(browser, live_server):
     row.get_by_role("button", name="YAML", exact=True).click()
     page.get_by_role("heading", name="Export Job YAML", exact=True).wait_for()
     assert "scheduled-python-job" in page.get_by_role("dialog").locator("textarea").input_value()
+    page.screenshot(path="test-results/desktop-yaml-export.png", full_page=True)
     page.get_by_role("button", name="Close", exact=True).click()
 
     assert not errors
