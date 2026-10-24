@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import builtins
-
 import time
 import uuid
 from typing import Any
@@ -20,6 +19,7 @@ from sqlalchemy import (
     Table,
     Text,
     delete,
+    event,
     func,
     insert,
     select,
@@ -97,7 +97,18 @@ class Database:
         options: dict[str, Any] = {"pool_pre_ping": True}
         if url.startswith("sqlite"):
             options["connect_args"] = {"timeout": 30}
+            if not url.endswith(":memory:"):
+                options.update(pool_size=1, max_overflow=0)
         self.engine = create_async_engine(url, **options)
+        if url.startswith("sqlite"):
+
+            @event.listens_for(self.engine.sync_engine, "connect")
+            def sqlite_pragmas(connection, record):
+                cursor = connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.fetchall()
+                cursor.execute("PRAGMA busy_timeout=30000")
+                cursor.close()
 
     async def initialize(self):
         async with self.engine.begin() as connection:
@@ -329,10 +340,49 @@ class Database:
             )
             return result.rowcount == 1
 
-    async def finish(self, identifier: str, owner: str, status: str, result: dict):
-        return await self.owned(
-            identifier, owner, status=status, result=result, finished=time.time(), lease=0
-        )
+    async def finish(
+        self, identifier: str, owner: str, status: str, result: dict, notify: bool = False
+    ):
+        now = time.time()
+        async with self.engine.begin() as connection:
+            changed = await connection.execute(
+                update(work)
+                .where(
+                    work.c.id == identifier,
+                    work.c.owner == owner,
+                    work.c.status == "running",
+                    work.c.lease > now,
+                )
+                .values(status=status, result=result, finished=now, lease=0)
+                .returning(work.c.project)
+            )
+            project = changed.scalar_one_or_none()
+            if project is None:
+                return False
+            if notify:
+                # Commit the terminal state and notification together: a crash
+                # after this transaction cannot silently lose the delivery.
+                await connection.execute(
+                    insert(work).values(
+                        id=f"run-{uuid.uuid4().hex}",
+                        project=project,
+                        resource=f"notify:{identifier}",
+                        dedupe=f"notification:{identifier}",
+                        payload={
+                            "kind": "notification",
+                            "message": {"run_id": identifier, "project": project, "status": status},
+                        },
+                        result={},
+                        status="queued",
+                        created=now,
+                        available=now,
+                        lease=0,
+                        cancel=False,
+                        owner=None,
+                        finished=None,
+                    )
+                )
+            return True
 
     async def cancel_run(self, identifier: str):
         async with self.engine.begin() as connection:
@@ -441,3 +491,29 @@ class Database:
             query = query.where(audit.c.project.in_(projects))
         async with self.engine.connect() as connection:
             return [dict(row) for row in (await connection.execute(query)).mappings()]
+
+    async def worker_count(self):
+        async with self.engine.connect() as connection:
+            return (
+                await connection.execute(
+                    select(func.count())
+                    .select_from(locks)
+                    .where(locks.c.id.like("worker:%"), locks.c.expires > time.time())
+                )
+            ).scalar_one()
+
+    async def attempts(self, run_id: str):
+        async with self.engine.connect() as connection:
+            return [
+                row[0]
+                for row in (
+                    await connection.execute(
+                        select(documents.c.data)
+                        .where(
+                            documents.c.kind == "attempt",
+                            documents.c.data["run_id"].as_string() == run_id,
+                        )
+                        .order_by(documents.c.id)
+                    )
+                ).all()
+            ]

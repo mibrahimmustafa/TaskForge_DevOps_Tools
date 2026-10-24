@@ -27,7 +27,7 @@ async def authenticate(request: Request) -> Principal:
     scheme, _, token = header.partition(" ")
     if scheme.lower() == "bearer" and token:
         for entry in request.app.state.settings.tokens:
-            if hmac.compare_digest(str(entry["token"]), token):
+            if hmac.compare_digest(str(entry["token"]).encode(), token.encode()):
                 return Principal(entry["name"], entry["role"], entry["projects"])
     raise HTTPException(
         401, "A valid access token is required", headers={"WWW-Authenticate": "Bearer"}

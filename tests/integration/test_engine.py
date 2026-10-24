@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import time
 
 import pytest
@@ -6,7 +7,7 @@ from sqlalchemy import update
 
 from taskforge.core.scheduler import TaskScheduler
 from taskforge.core.worker import RedactedLog, Worker
-from taskforge.jobs.models import Job, Pipeline
+from taskforge.jobs.models import Job, Pipeline, TriggerType
 from taskforge.storage.database import ConflictError, work
 
 
@@ -83,8 +84,11 @@ async def test_exception_finalizes_run_and_retry_count(db, settings, monkeypatch
 
     monkeypatch.setattr("taskforge.core.worker.get_executor", lambda executor: Executor())
     run = await scheduler.submit(job)
-    claimed = await db.claim("fence", 30)
-    await Worker(db, settings).execute(claimed)
+    for attempt in range(3):
+        claimed = await db.claim(f"fence-{attempt}", 30)
+        await Worker(db, settings).execute(claimed)
+        async with db.engine.begin() as connection:
+            await connection.execute(update(work).where(work.c.id == run["id"]).values(available=0))
     result = await db.run(run["id"])
     assert result["status"] == "success" and len(result["result"]["attempts"]) == 3
 
@@ -162,7 +166,7 @@ async def test_pipeline_failure_skips_dependants_and_independent_work_completes(
 async def test_schedule_once_and_invalid_definitions_are_not_saved(db):
     scheduler = TaskScheduler(db)
     job = make_job().model_copy(
-        update={"trigger": "oneshot", "trigger_expr": "2020-01-01T00:00:00+00:00"}
+        update={"trigger": TriggerType.ONESHOT, "trigger_expr": "2020-01-01T00:00:00+00:00"}
     )
     await scheduler.add_or_update_job(job)
     await scheduler.tick()
@@ -175,3 +179,90 @@ async def test_schedule_once_and_invalid_definitions_are_not_saved(db):
     with pytest.raises(ValueError):
         await scheduler.add_or_update_job(invalid)
     assert await db.get("job", "invalid") is None
+
+
+async def test_pipeline_hands_verified_artifacts_to_dependants(db, settings):
+    pipeline = Pipeline(
+        id="handoff",
+        name="Artifact handoff",
+        steps=[
+            {
+                "id": "build",
+                "job": make_job().model_copy(
+                    update={
+                        "command": "from pathlib import Path; Path('package.txt').write_text('immutable')",
+                        "artifact_paths": ["package.txt"],
+                    }
+                ),
+            },
+            {
+                "id": "verify",
+                "needs": ["build"],
+                "job": make_job().model_copy(
+                    update={
+                        "command": "from pathlib import Path; assert Path('inputs/build/package.txt').read_text() == 'immutable'"
+                    }
+                ),
+            },
+        ],
+    )
+    run = await TaskScheduler(db).submit_pipeline(pipeline)
+    await Worker(db, settings).execute(await db.claim("fence", 30))
+    final = await db.run(run["id"])
+    assert final["status"] == "success"
+    assert final["result"]["steps"]["verify"]["status"] == "success"
+
+
+async def test_completion_and_notification_are_atomic_and_idempotent(db):
+    run = await db.enqueue("default", "job", {"kind": "job"})
+    await db.claim("fence", 30)
+    assert await db.finish(run["id"], "fence", "success", {}, notify=True)
+    assert not await db.finish(run["id"], "fence", "success", {}, notify=True)
+    deliveries = [r for r in await db.runs(None) if r["payload"]["kind"] == "notification"]
+    assert len(deliveries) == 1
+    assert deliveries[0]["payload"]["message"]["run_id"] == run["id"]
+
+
+async def test_database_heartbeat_failure_cancels_execution(db, settings, monkeypatch):
+    started, stopped = asyncio.Event(), asyncio.Event()
+
+    class Executor:
+        async def execute(self, *args, **kwargs):
+            started.set()
+            try:
+                await asyncio.sleep(20)
+            finally:
+                stopped.set()
+
+    async def unavailable(identifier):
+        raise ConnectionError("coordination unavailable")
+
+    monkeypatch.setattr("taskforge.core.worker.get_executor", lambda executor: Executor())
+    await TaskScheduler(db).submit(make_job())
+    claimed = await db.claim("fence", 30)
+    task = asyncio.create_task(Worker(db, settings).execute(claimed))
+    await started.wait()
+    monkeypatch.setattr(db, "run", unavailable)
+    await asyncio.wait_for(task, 5)
+    assert stopped.is_set()
+
+
+async def test_dependency_artifact_cannot_escape_workspace(db, settings):
+    job = make_job()
+    run = await TaskScheduler(db).submit(job)
+    claimed = await db.claim("fence", 30)
+    raw = b"artifact"
+    digest = hashlib.sha256(raw).hexdigest()
+    origin = settings.data_dir / "artifacts" / "default" / run["id"] / digest
+    origin.parent.mkdir(parents=True)
+    origin.write_bytes(raw)
+    stream = RedactedLog(db, run["id"], "fence", [])
+    with pytest.raises(ValueError, match="escapes"):
+        await Worker(db, settings).execute_job(
+            job,
+            claimed,
+            stream,
+            "step",
+            inputs={"dependency": [{"name": "../../../../outside", "sha256": digest}]},
+        )
+    assert not (settings.data_dir / "workspaces" / "outside").exists()

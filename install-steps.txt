@@ -1,160 +1,167 @@
-================================================================
- TaskForge — خطوات التثبيت والتشغيل على Windows (PowerShell)
-================================================================
+TaskForge 0.2 - Installation, validation, and operations
+=====================================================
 
-[ المتطلبات ]
---------------
-- Python 3.11 أو أحدث
-- pip (مدمج مع Python)
-- Docker (اختياري — للتشغيل بالحاوية)
+1. Prerequisites
+   Python 3.11+ and pip. Git for repository checkout.
+   Optional: PostgreSQL 16+, Docker engine/CLI, kubectl and cluster credentials.
+   Execute commands from the repository root.
+   On PowerShell, virtual-environment activation is optional: use explicit paths below.
+   On Linux/macOS replace .venv\Scripts\ with .venv/bin/.
 
+2. Install and generate private configuration
+   python -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -e ".[dev,postgres,browser]"
+   .\.venv\Scripts\taskforge.exe init
 
-================================================================
- الخطوة 1 — التحقق من Python
-================================================================
+   init creates .taskforge/config.env with separate administrator and release-reviewer
+   tokens and refuses to overwrite an existing file. Keep this file private.
+   Protect its Windows ACL / Unix permissions. Never commit it.
+   Existing deployments should rotate any credentials previously committed to Git;
+   removing .env from the current tree does not remove historical copies.
 
-  python --version
-  pip --version
+3. Configure
+   Add needed settings from .env.example to .taskforge/config.env.
+   Process environment takes precedence over config.env, which takes precedence over .env.
+   JSON settings should occupy one line and be single-quoted in dotenv files.
 
-  إذا لم يكن Python مثبتاً، حمّله من:
-  https://www.python.org/downloads/
+   Local storage:
+     TASKFORGE_STORAGE_URL=sqlite+aiosqlite:///taskforge.db
+     TASKFORGE_DATA_DIR=.taskforge
 
+   PostgreSQL:
+     TASKFORGE_STORAGE_URL=postgresql+asyncpg://USER:URL_ENCODED_PASSWORD@HOST:5432/taskforge
 
-================================================================
- الخطوة 2 — إنشاء بيئة افتراضية (موصى به)
-================================================================
+   Use an absolute shared TASKFORGE_DATA_DIR for API and workers on separate processes/hosts.
+   Back up PostgreSQL and the artifact directory together.
+   Jobs/pipelines have globally unique IDs within each definition kind.
 
-  python -m venv .venv
-  .venv\Scripts\Activate.ps1
+4. Start two processes
+   Terminal A:
+     .\.venv\Scripts\taskforge.exe server start
+   Terminal B:
+     .\.venv\Scripts\taskforge.exe worker start
 
-  ملاحظة: إذا ظهر خطأ execution policy، نفّذ أولاً:
-  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+   Open http://127.0.0.1:8080/ and use the administrator token from config.env.
+   Check /ready and the dashboard's online worker indicator.
+   A ready API without an online worker queues work but cannot execute it.
+   Configuration changes require restarting affected processes.
 
+   Shell/Python jobs:
+     Set TASKFORGE_ALLOW_HOST_EXECUTION=true on a trusted, isolated worker.
+     Do not enable this for untrusted code.
 
-================================================================
- الخطوة 3 — تثبيت المكتبات
-================================================================
+   Docker jobs:
+     Install Docker CLI and provide access to the intended engine on the worker.
+     Use prebuilt dependency images; job containers run without network access.
+     Docker bind mounts must resolve on the Docker daemon host.
 
-  pip install fastapi "uvicorn[standard]" apscheduler pydantic `
-    sqlalchemy aiosqlite httpx typer rich structlog `
-    prometheus-client "python-jose[cryptography]" `
-    "passlib[bcrypt]" python-multipart
+   HTTP jobs:
+     Configure TASKFORGE_ALLOWED_HTTP_HOSTS='["api.example.com"]'.
+     Redirects and ambient proxy environment settings are not followed.
 
-  ثم تثبيت المشروع نفسه (يُفعّل أمر taskforge في الترمينال):
-  pip install -e .
+5. Docker Compose API/worker/PostgreSQL
+   Run init first. In PowerShell set a long URL-safe password without printing it:
+     $env:POSTGRES_PASSWORD = .\.venv\Scripts\taskforge.exe token
+     docker compose -f docker/docker-compose.yml up --build -d
+     docker compose -f docker/docker-compose.yml ps
 
+   Store the password securely and reuse it when operating this Compose project.
+   Do not use "down -v" unless intentionally deleting the database/artifact volumes.
+   The API binds to 127.0.0.1:8080. Put TLS and access controls at your reverse proxy.
+   The worker image does not contain git/docker/kubectl or a Docker socket mount.
+   Provision a dedicated worker with the necessary tools for those adapters.
+   The default Compose worker can run allowlisted HTTP jobs, or trusted Python/shell
+   workloads if explicitly enabled. Both services share the artifacts volume.
 
-================================================================
- الخطوة 4 — إعداد ملف البيئة
-================================================================
+6. First artifact pipeline
+   Use examples/artifact-pipeline.json in the dashboard Pipelines JSON editor.
+   It requires Docker on the worker. Save, queue, and inspect the two step results.
+   The verify step reads inputs/build/package.txt after SHA-256 verification.
+   Download the final artifact from the execution dialog.
 
-  copy .env.example .env
+7. Source triggers
+   Set TASKFORGE_GITHUB_REPOSITORIES to allowed public owner/repository names.
+   Configure a GitHub webhook to https://YOUR_HOST/api/triggers/github, JSON payload,
+   push events only, and the same TASKFORGE_GITHUB_SECRET on TaskForge.
+   Create a matching pipeline repository and branch.
+   Manual repository runs require the exact 40-character lowercase commit SHA.
+   Private repository credentials and fork pull-request execution are not implemented.
+   Custom job webhooks require a >=32-character secret, X-Taskforge-Secret, and
+   Idempotency-Key headers at POST /api/triggers/webhook/JOB_ID.
 
-  افتح .env وتأكد من وجود هذه القيم:
+8. Docker and Kubernetes promotion
+   Copy the target examples from README.md and configure actual host/namespace/context,
+   health URL, image repository, and require_approval in TASKFORGE_DEPLOYMENT_TARGETS.
+   Supply the same target configuration to API and workers.
+   Provide Docker access or kubectl with an explicit kubeconfig to the dedicated worker.
+   Builds must publish release.json with an immutable image digest as a run artifact.
+   Request deployment through the dashboard; sign in as a different administrator to approve.
+   Test a successful deployment and an intentionally unhealthy deployment in staging.
+   Confirm the old image/service is restored. Kubernetes needs meaningful readiness probes.
 
-    TASKFORGE_SECRET_KEY=change-me-to-a-long-random-secret
-    TASKFORGE_STORAGE_URL=sqlite+aiosqlite:///taskforge.db
-    TASKFORGE_LOG_LEVEL=info
-    TASKFORGE_METRICS_ENABLED=true
+   Failed/cancelled/lost deployment:
+   - Stop or isolate the previous runner and verify remote commands have stopped.
+   - Inspect the target and any rollback attempt; restore service manually if necessary.
+   - Use Deployments > Reconcile and type VERIFIED to release the environment lock.
+   - Queue a reviewed deployment.
+   To restore an older successful build, choose the explicit rollback intent as admin.
+   The lock is intentionally retained for interrupted deployments to prevent overlapping
+   remote side effects. Lease fencing alone cannot fence Docker/Kubernetes operations.
 
+9. Legacy upgrade
+   Stop old API/scheduler processes. Back up the original SQLite file and old logs.
+   Configure the destination storage URL and run:
+     .\.venv\Scripts\taskforge.exe migrate-legacy PATH_TO_OLD_DATABASE
 
-================================================================
- الخطوة 5 — تشغيل السيرفر
-================================================================
+   The importer reads the source database without modifying it and is repeatable.
+   Imported jobs are paused. Review every reported conversion error and job definition.
+   Historical metadata is stored separately; legacy logs remain in the original database
+   and are not automatically exposed by the new API. Resume reviewed jobs individually.
+   Version 0.2 initializes schema version 1; unknown versions fail startup.
+   There is no automated downgrade or incremental schema migration framework yet.
 
-  الطريقة 1 — عبر CLI (بعد pip install -e .):
-    taskforge server start
+10. Tests
+    .\.venv\Scripts\ruff.exe check .
+    .\.venv\Scripts\ruff.exe format --check .
+    .\.venv\Scripts\mypy.exe taskforge
+    .\.venv\Scripts\bandit.exe -r taskforge -c pyproject.toml --severity-level medium
+    .\.venv\Scripts\pytest.exe --cov=taskforge
+    .\.venv\Scripts\python.exe -m build
 
-  الطريقة 2 — مباشرة عبر uvicorn (بدون pip install -e .):
-    uvicorn taskforge.api.app:create_app --factory --host 0.0.0.0 --port 8080 --reload
+    Browser tests:
+      .\.venv\Scripts\python.exe -m playwright install chromium
+      $env:TASKFORGE_BROWSER_TESTS = "1"
+      .\.venv\Scripts\pytest.exe tests/browser
+      Remove-Item Env:TASKFORGE_BROWSER_TESTS
+    Screenshots are written to ignored test-results/.
+    If a corporate CA is required, configure the trusted CA; do not disable TLS validation.
 
-  عند النجاح ستظهر رسالة:
-    INFO: Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+    PostgreSQL tests (use a disposable database, never production):
+      $env:TASKFORGE_TEST_POSTGRES_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/TEST_DB"
+      .\.venv\Scripts\pytest.exe tests/integration
+      Remove-Item Env:TASKFORGE_TEST_POSTGRES_URL
+    The test user must be able to create/drop isolated test schemas.
 
+    Live Docker tests:
+      $env:TASKFORGE_DOCKER_TESTS = "1"
+      .\.venv\Scripts\pytest.exe tests/integration/test_docker_live.py
+      Remove-Item Env:TASKFORGE_DOCKER_TESTS
+    Tests pull a public Python image and create/delete only their uniquely named containers.
 
-================================================================
- الخطوة 6 — التحقق من التشغيل (في ترمينال جديد)
-================================================================
+11. GitHub release setup
+    Enable Actions and package write permissions for the repository.
+    Configure the "release" environment with required reviewers and protected tags.
+    Push a version tag only when pyproject.toml matches (for example v0.2.0).
+    Release checks must pass before GHCR/image and GitHub Release publication.
+    Configure real staging/production promotion separately using TaskForge targets.
+    A repository push is not authorization to deploy to a production target.
 
-  تحقق من الصحة:
-    curl http://localhost:8080/health
-
-  أو افتح في المتصفح:
-    http://localhost:8080/         <-- لوحة التحكم الإدارية التفاعلية (Web Dashboard)
-    http://localhost:8080/docs     <-- Swagger UI (توثيق API التفاعلي)
-    http://localhost:8080/metrics  <-- Prometheus metrics
-    http://localhost:8080/health   <-- Health check
-
-
-================================================================
- الخطوة 7 — إدارة الـ Jobs وتشغيلها
-================================================================
-
-  الطريقة الأولى — عبر لوحة الويب (مباشرة وبضغطة زر):
-    1. افتح http://localhost:8080 في المتصفح
-    2. ستجد جميع الوظائف المسجلة جاهزة
-    3. اضغط على زر التشغيل ▶ لتشغيل أي وظيفة فورياً
-    4. اضغط على "+ New Job" لإنشاء وظيفة جديدة عبر النموذج المرئي
-    5. راقب اللوجات الحية والرسوم البيانية في تبويب Live Logs و Dashboard
-
-  الطريقة الثانية — عبر سطر الأوامر (CLI):
-    إنشاء job من ملف مثال:
-      taskforge jobs create examples\hello_world_job.json
-
-    عرض قائمة الـ jobs:
-      taskforge jobs list
-
-    تشغيل job فوري:
-      taskforge jobs run job-hello-world
-
-
-================================================================
- الخطوة 8 — تشغيل الاختبارات
-================================================================
-
-  pip install pytest pytest-asyncio pytest-cov
-
-  تشغيل كل الاختبارات:
-    pytest tests/ -v
-
-  مع تقرير التغطية:
-    pytest tests/ --cov=taskforge --cov-report=html
-
-
-================================================================
- حل المشكلات الشائعة
-================================================================
-
-المشكلة: taskforge لا يُعرف كأمر
-الحل:    تأكد أنك داخل البيئة الافتراضية:
-           .venv\Scripts\Activate.ps1
-         ثم نفّذ:
-           pip install -e .
-
-المشكلة: خطأ execution policy عند تفعيل venv
-الحل:    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-
-المشكلة: ModuleNotFoundError عند تشغيل السيرفر
-الحل:    pip install -e .
-         ثم أعد تفعيل البيئة الافتراضية
-
-المشكلة: Port 8080 مشغول
-الحل:    uvicorn taskforge.api.app:create_app --factory --port 9090
-
-================================================================
- ملاحظة: Docker غير مطلوب للتشغيل المحلي
- يمكن تحميله من: https://www.docker.com/products/docker-desktop
-================================================================
-
-
-
-
-------------------------------------------------------------------------------------------------------------
-# 1. تثبيت المشروع نفسه (يفعّل أمر taskforge)
-pip install -e .
-
-# 2. تشغيل السيرفر
-taskforge server start
-
-# أو بدون pip install -e . مباشرة:
-uvicorn taskforge.api.app:create_app --factory --host 0.0.0.0 --port 8080 --reload
+12. Operational checks
+    /health: API liveness. /ready: database connectivity.
+    /metrics: bearer-authenticated admin metrics from persisted run states.
+    Run lost: inspect side effects, then submit a new reviewed run.
+    Logs: bounded per execution attempt/claim; configured secret values are redacted.
+    Artifacts: 50 MiB per file, <=50 declared paths; contents are not secret-scanned.
+    Plan retention and capacity monitoring for database logs, workspaces, and artifacts.
+    Take coordinated backups and prove restore in a disposable environment.
+    Finish the outstanding acceptance criteria in implementation_plan.md before production.

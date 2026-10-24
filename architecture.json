@@ -1,98 +1,193 @@
 {
   "project": "TaskForge",
-  "version": "0.1.0",
-  "repository": "https://github.com/mibrahimmustafa/TaskForge_DevOps_Tools.git",
-  "description": "Production-grade, extensible DevOps task scheduler and real-time Web Dashboard in Python",
-  "architecture": {
-    "presentation_tier": {
-      "web_dashboard": {
-        "type": "Single Page Application (SPA)",
-        "tech_stack": ["HTML5", "Vanilla CSS3", "JavaScript ES6+", "Chart.js"],
-        "served_by": "FastAPI StaticFiles mount at /dashboard and /",
-        "capabilities": [
-          "Overview dashboard with real-time counters and activity ticker",
-          "Jobs table with sorting, search, filtering, and inline controls",
-          "Live execution history and log inspector",
-          "Cron and interval expression builders",
-          "Notification channel manager",
-          "Prometheus metrics visualization",
-          "System health monitor and masked environment inspection",
-          "Plugin manager with toggle switches",
-          "Appearance customizer with Dark/Light mode and 5 accent palettes"
-        ]
-      },
-      "rest_api": {
-        "framework": "FastAPI",
-        "asgi_server": "Uvicorn",
-        "endpoints": [
-          "GET /health",
-          "GET /metrics",
-          "GET /api/jobs",
-          "POST /api/jobs",
-          "GET /api/jobs/{id}",
-          "DELETE /api/jobs/{id}",
-          "POST /api/jobs/{id}/run",
-          "POST /api/jobs/{id}/pause",
-          "POST /api/jobs/{id}/resume",
-          "GET /api/runs",
-          "GET /api/runs/{id}",
-          "POST /api/triggers/webhook/{job_id}",
-          "GET /api/plugins",
-          "POST /api/plugins/{id}/toggle",
-          "GET /api/system/stats",
-          "GET /api/system/env"
-        ]
-      },
-      "command_line_interface": {
-        "framework": "Typer + Rich",
-        "command": "taskforge",
-        "subcommands": ["server start", "jobs list", "jobs create", "jobs run", "version"]
-      }
-    },
-    "core_engine": {
-      "scheduler": {
-        "driver": "APScheduler AsyncIOScheduler",
-        "dispatch_model": "Non-blocking AsyncIO coroutines"
-      },
-      "event_bus": {
-        "type": "Async in-memory Pub/Sub",
-        "events": ["job.started", "job.success", "job.failed"]
-      },
-      "configuration": {
-        "standard": "12-Factor App",
-        "source": "Environment variables (.env)"
-      },
-      "observability": {
-        "logging": "structlog JSON structured logs",
-        "metrics": "Prometheus client (Counters, Histograms, Gauges)"
-      }
-    },
-    "trigger_subsystem": {
-      "interface": "BaseTrigger",
-      "implementations": [
-        {"type": "cron", "class": "CronTrigger", "syntax": "Standard 5-part crontab"},
-        {"type": "interval", "class": "IntervalTrigger", "syntax": "Natural string (e.g. every 30m, 5s)"},
-        {"type": "webhook", "class": "WebhookTrigger", "auth": "Header token verification"},
-        {"type": "oneshot", "class": "OneShotTrigger", "syntax": "Exact date/time"}
-      ]
-    },
-    "executor_subsystem": {
-      "interface": "BaseExecutor",
-      "implementations": [
-        {"type": "shell", "class": "ShellExecutor", "support": ["Windows PowerShell/cmd", "Linux bash/sh"]},
-        {"type": "python", "class": "PythonExecutor", "support": "In-process Python execution"},
-        {"type": "http", "class": "HTTPExecutor", "support": "Async HTTP client (httpx)"},
-        {"type": "docker", "class": "DockerExecutor", "support": "CLI-based container runner"}
-      ]
-    },
-    "storage_tier": {
-      "interface": "StorageBackend",
-      "active_backend": "SQLiteStorage (aiosqlite)",
-      "database_schema": [
-        "jobs (id, name, description, trigger, trigger_expr, executor, command, status, tags, etc.)",
-        "job_runs (id, job_id, job_name, status, started_at, finished_at, duration_seconds, exit_code, logs)"
+  "version": "0.2.0",
+  "schema_version": 1,
+  "repository": "https://github.com/mibrahimmustafa/TaskForge_DevOps_Tools",
+  "description": "Self-hosted CI/CD and task automation for trusted teams",
+  "components": {
+    "dashboard": {
+      "path": "taskforge/dashboard",
+      "technology": [
+        "HTML",
+        "CSS",
+        "vanilla JavaScript"
       ],
-      "future_backends": ["PostgreSQL (asyncpg)"]
+      "views": [
+        "overview",
+        "jobs",
+        "pipelines",
+        "run history",
+        "deployments",
+        "integrations",
+        "audit"
+      ],
+      "authentication": "Bearer token kept only in browser memory",
+      "refresh": "5s workspace; 1.5s execution log polling",
+      "accessibility": [
+        "labeled forms",
+        "keyboard focus",
+        "dialog Escape dismissal",
+        "responsive layout",
+        "dark/light themes",
+        "literal text rendering"
+      ]
+    },
+    "api": {
+      "path": "taskforge/api",
+      "framework": "FastAPI",
+      "default_bind": "127.0.0.1:8080",
+      "execution": "Queue only; explicit embedded_worker option for development",
+      "roles": [
+        "viewer",
+        "operator",
+        "admin"
+      ],
+      "authorization": "Project scopes checked on definitions, runs, logs, artifacts, and deployment requests",
+      "request_body_limit_bytes": 1048576
+    },
+    "storage": {
+      "path": "taskforge/storage/database.py",
+      "driver": "SQLAlchemy Core async",
+      "backends": {
+        "local": "SQLite with WAL",
+        "team": "PostgreSQL via asyncpg"
+      },
+      "tables": [
+        "tf_documents",
+        "tf_work",
+        "tf_locks",
+        "tf_logs",
+        "tf_audit",
+        "tf_schema"
+      ],
+      "invariants": [
+        "Optimistic version compare-and-swap",
+        "Atomic queue claim",
+        "Unique execution fence and lease",
+        "Occurrence/payload deduplication",
+        "Terminal state and notification queued in one transaction"
+      ],
+      "migration": "Version 1 initialization/guard plus read-only idempotent legacy import; incremental schema migrations pending"
+    },
+    "worker": {
+      "path": "taskforge/core/worker.py",
+      "entrypoint": "taskforge worker start",
+      "responsibilities": [
+        "Persisted schedule controller election",
+        "Queue claim and resource locking",
+        "Heartbeat and cancellation",
+        "DAG execution",
+        "Artifact integrity",
+        "Deployment verification and reconciliation locks",
+        "Notification delivery",
+        "Explicit installed-plugin lifecycle"
+      ],
+      "concurrency": "Per-worker concurrent runs and per-pipeline parallel steps",
+      "retry": "Standalone jobs persist availability/attempts and release slots; pipeline steps retry within live pipeline execution",
+      "recovery": "Expired running leases become lost; no automatic side-effect replay"
+    },
+    "executors": {
+      "docker": "Structured CLI, no network, dropped capabilities, no-new-privileges, resource limits, workspace mount, forced cleanup",
+      "python": "Separate isolated-interpreter subprocess; trusted host opt-in",
+      "shell": "Platform subprocess; trusted host opt-in",
+      "http": "Exact hostname allowlist, bounded response, no redirects or ambient proxies",
+      "process_cleanup": "Unix process groups; Windows Job Objects"
+    },
+    "sources": {
+      "github": "HMAC-verified push payloads, repository/branch allowlist, body deduplication, public repository exact-commit checkout",
+      "webhook": "Hashed shared secret, idempotency key, active webhook definition required"
+    },
+    "artifacts": {
+      "backend": "Shared local filesystem",
+      "layout": "<data_dir>/artifacts/<project>/<run>/<sha256>",
+      "max_file_bytes": 52428800,
+      "max_paths_per_job": 50,
+      "handoff": "Verified copy to inputs/<dependency>/<filename>",
+      "access": "Authenticated project-scoped API",
+      "retention": "Manual; automation pending",
+      "secret_scanning": false
+    },
+    "deployments": {
+      "supported": [
+        "artifact-only pipeline completion",
+        "Docker",
+        "Kubernetes"
+      ],
+      "approval": "Different administrator identity by default; bound to image digest and target configuration",
+      "provenance": "Matching checksum-verified release.json from successful source run",
+      "serialization": "Environment lock; failed/cancelled/lost deployment retained until explicit admin reconciliation",
+      "stale_builds": "Reject older source creation time unless admin requests rollback",
+      "docker": "Pull before stopping existing container; backup rename; candidate health check; restoration on failure",
+      "kubernetes": "Set configured Deployment container image; rollout verification; previous-image restoration on failure",
+      "limitations": [
+        "Docker stop/start downtime",
+        "Actual Kubernetes target acceptance required",
+        "Build provenance trusts authorized build authors"
+      ]
+    },
+    "observability": {
+      "health": "GET /health",
+      "readiness": "GET /ready checks database",
+      "metrics": "GET /metrics authenticated admin; persisted status gauges and online worker count",
+      "audit": "GET /api/audit scoped admin records",
+      "notifications": "HTTP endpoint; transactional outbox work, five delivery attempts, idempotency key"
     }
-  }
+  },
+  "deployment": {
+    "api_image": "docker/Dockerfile non-root image with dashboard package data",
+    "compose": "docker/docker-compose.yml API + worker + PostgreSQL + shared artifact volume",
+    "worker_prerequisites": [
+      "Tools for selected executors: git, Docker, kubectl as needed",
+      "Matching target configuration",
+      "Shared artifact directory",
+      "Isolated trust boundary"
+    ],
+    "default_image_tools": "Python only; provision specialized workers for Git/Docker/Kubernetes"
+  },
+  "ci": {
+    "checks": ".github/workflows/checks.yml",
+    "release": ".github/workflows/release.yml",
+    "matrix": {
+      "os": [
+        "ubuntu-latest",
+        "windows-latest"
+      ],
+      "python": [
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
+    },
+    "gates": [
+      "Ruff lint/format",
+      "mypy",
+      "Bandit",
+      "pytest coverage",
+      "PostgreSQL integration",
+      "Chromium desktop/mobile",
+      "wheel assets",
+      "Docker smoke"
+    ],
+    "release_outputs": [
+      "GHCR image",
+      "wheel",
+      "sdist",
+      "release.json digest manifest",
+      "SHA256SUMS",
+      "Buildx SBOM/provenance"
+    ],
+    "production_deploy": "Requires configured real target and separate approval"
+  },
+  "known_limits": [
+    "Static tokens; OIDC pending",
+    "Local shared artifacts; no automatic retention",
+    "No private repository authentication or GitHub commit status reporting",
+    "No event bus trigger",
+    "No pipeline checkpoint resume",
+    "Definition lists capped at 500; scheduler scans 10000",
+    "No aggregate project resource quota or worker capability routing",
+    "Dependency version ranges, no pinned dependency lock",
+    "Kubernetes verified with simulated commands until a real staging cluster is supplied"
+  ]
 }

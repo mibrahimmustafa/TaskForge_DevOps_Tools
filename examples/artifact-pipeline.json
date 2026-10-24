@@ -1,0 +1,47 @@
+{
+  "id": "artifact-demo",
+  "project": "default",
+  "name": "Build and verify an artifact",
+  "version": 0,
+  "steps": [
+    {
+      "id": "build",
+      "needs": [],
+      "job": {
+        "id": "build",
+        "project": "default",
+        "name": "Build",
+        "trigger": "manual",
+        "executor": "docker",
+        "image": "python:3.12-alpine",
+        "args": [
+          "python",
+          "-c",
+          "from pathlib import Path; Path('package.txt').write_text('verified package'); print('Built package')"
+        ],
+        "artifact_paths": [
+          "package.txt"
+        ]
+      }
+    },
+    {
+      "id": "verify",
+      "needs": [
+        "build"
+      ],
+      "job": {
+        "id": "verify",
+        "project": "default",
+        "name": "Verify",
+        "trigger": "manual",
+        "executor": "docker",
+        "image": "python:3.12-alpine",
+        "args": [
+          "python",
+          "-c",
+          "from pathlib import Path; assert Path('inputs/build/package.txt').read_text() == 'verified package'; print('Artifact verified')"
+        ]
+      }
+    }
+  ]
+}

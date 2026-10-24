@@ -15,6 +15,7 @@ class DeploymentRequest(BaseModel):
     target: str
     image: str
     source_run: str
+    rollback: bool = False
 
 
 @router.get("/targets")
@@ -41,6 +42,8 @@ async def request_deployment(
     if not target:
         raise HTTPException(404, "Deployment target not found")
     principal.check(target["project"], "operator")
+    if body.rollback:
+        principal.check(target["project"], "admin")
     source = await find_run(request, body.source_run, principal)
     if source["project"] != target["project"] or source["status"] != "success":
         raise HTTPException(422, "Source run must be successful and belong to this project")
@@ -77,6 +80,8 @@ async def request_deployment(
         "target": body.target,
         "image": body.image,
         "source_run": body.source_run,
+        "source_created": source["created"],
+        "rollback": body.rollback,
         "requested_by": principal.name,
         "target_hash": hashlib.sha256(json.dumps(target, sort_keys=True).encode()).hexdigest(),
     }
@@ -102,3 +107,32 @@ async def approve(run_id: str, request: Request, principal: Principal = Depends(
         run["project"], principal.name, "deployment.approved", run_id
     )
     return {"id": run_id, "status": "queued"}
+
+
+class Reconciliation(BaseModel):
+    confirmed_stopped: bool
+
+
+@router.post("/{run_id}/reconcile")
+async def reconcile(
+    run_id: str,
+    body: Reconciliation,
+    request: Request,
+    principal: Principal = Depends(authenticate),
+):
+    run = await find_run(request, run_id, principal, "admin")
+    if run["payload"]["kind"] != "deployment" or run["status"] not in {
+        "failed",
+        "cancelled",
+        "lost",
+    }:
+        raise HTTPException(409, "Only interrupted or failed deployments can be reconciled")
+    if not body.confirmed_stopped:
+        raise HTTPException(
+            422, "Verify the old runner stopped and the target state before releasing its lock"
+        )
+    await request.app.state.db.unlock(run["resource"], run["owner"])
+    await request.app.state.db.record_audit(
+        run["project"], principal.name, "deployment.reconciled", run_id
+    )
+    return {"id": run_id, "status": "environment_lock_released"}

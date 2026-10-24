@@ -50,6 +50,12 @@ async def get_run(run_id: str, request: Request, principal: Principal = Depends(
     return public_run(await find_run(request, run_id, principal))
 
 
+@router.get("/{run_id}/attempts")
+async def attempts(run_id: str, request: Request, principal: Principal = Depends(authenticate)):
+    await find_run(request, run_id, principal)
+    return await request.app.state.db.attempts(run_id)
+
+
 @router.post("/{run_id}/cancel", status_code=202)
 async def cancel_run(run_id: str, request: Request, principal: Principal = Depends(authenticate)):
     run = await find_run(request, run_id, principal, "operator")

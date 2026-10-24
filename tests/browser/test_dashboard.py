@@ -22,7 +22,9 @@ def live_server(tmp_path_factory):
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     env = os.environ | {
-        "TASKFORGE_TOKENS": json.dumps([{"token": TOKEN, "name": "browser-admin", "role": "admin", "projects": ["default"]}]),
+        "TASKFORGE_TOKENS": json.dumps(
+            [{"token": TOKEN, "name": "browser-admin", "role": "admin", "projects": ["default"]}]
+        ),
         "TASKFORGE_STORAGE_URL": f"sqlite+aiosqlite:///{directory / 'test.db'}",
         "TASKFORGE_DATA_DIR": str(directory / "data"),
         "TASKFORGE_ALLOW_HOST_EXECUTION": "true",
@@ -30,9 +32,20 @@ def live_server(tmp_path_factory):
     }
     with (directory / "server.log").open("w") as output:
         process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "taskforge.api.app:create_app", "--factory",
-             "--host", "127.0.0.1", "--port", str(port)],
-            env=env, stdout=output, stderr=subprocess.STDOUT,
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "taskforge.api.app:create_app",
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            env=env,
+            stdout=output,
+            stderr=subprocess.STDOUT,
         )
         url = f"http://127.0.0.1:{port}"
         try:
@@ -58,6 +71,7 @@ def live_server(tmp_path_factory):
 @pytest.fixture
 def browser():
     from playwright.sync_api import sync_playwright
+
     with sync_playwright() as playwright:
         options = {"headless": True}
         channel = os.getenv("TASKFORGE_BROWSER_CHANNEL")
@@ -81,12 +95,16 @@ def test_desktop_job_workflow_and_real_logs(browser, live_server):
     page.get_by_label("Name", exact=True).fill("Browser verified")
     page.get_by_label("ID", exact=True).fill("browser-verified")
     page.get_by_label("Executor", exact=True).select_option("python")
-    page.get_by_label("Command / Python code / HTTP request", exact=True).fill("print('REAL_BROWSER_OUTPUT')")
+    page.get_by_label("Command / Python code / HTTP request", exact=True).fill(
+        "print('REAL_BROWSER_OUTPUT')"
+    )
     page.get_by_role("dialog").get_by_role("button", name="Create job", exact=True).click()
     row = page.get_by_role("row").filter(has_text="Browser verified")
     row.wait_for()
     row.get_by_role("button", name="Run", exact=True).click()
-    page.get_by_label("Execution log").get_by_text("REAL_BROWSER_OUTPUT", exact=False).wait_for(timeout=30000)
+    from playwright.sync_api import expect
+
+    expect(page.get_by_label("Execution log")).to_contain_text("REAL_BROWSER_OUTPUT", timeout=30000)
     page.get_by_role("dialog").get_by_text("success", exact=True).wait_for(timeout=30000)
     Path("test-results").mkdir(exist_ok=True)
     page.screenshot(path="test-results/desktop-live-run.png", full_page=True)
@@ -101,10 +119,18 @@ def test_desktop_job_workflow_and_real_logs(browser, live_server):
 
 def test_mobile_layout_keyboard_and_literal_untrusted_text(browser, live_server):
     headers = {"Authorization": "Bearer " + TOKEN}
-    response = httpx.post(live_server + "/api/jobs", headers=headers, json={
-        "id": "literal-text", "name": "<img src=x onerror=alert(1)>", "trigger": "manual",
-        "executor": "python", "command": "print('safe')",
-    }, trust_env=False)
+    response = httpx.post(
+        live_server + "/api/jobs",
+        headers=headers,
+        json={
+            "id": "literal-text",
+            "name": "<img src=x onerror=alert(1)>",
+            "trigger": "manual",
+            "executor": "python",
+            "command": "print('safe')",
+        },
+        trust_env=False,
+    )
     assert response.status_code == 200
     page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True)
     page.goto(live_server)
@@ -126,4 +152,3 @@ def test_mobile_layout_keyboard_and_literal_untrusted_text(browser, live_server)
     page.get_by_role("button", name="Sign out").click()
     assert page.get_by_label("Access token").input_value() == ""
     page.close()
-

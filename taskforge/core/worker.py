@@ -19,6 +19,7 @@ from taskforge.deployments.adapters import deploy, validate_deployment
 from taskforge.executors import get_executor
 from taskforge.executors.process import run_process
 from taskforge.jobs.models import Job, Pipeline
+from taskforge.plugins.loader import PluginLoader
 from taskforge.storage.database import Database
 
 
@@ -66,9 +67,11 @@ class Worker:
         self.tasks: set[asyncio.Task] = set()
         self.stopping = False
         self.scheduler = TaskScheduler(db)
+        self.plugins = PluginLoader()
 
     async def serve(self):
         await self.db.initialize()
+        await self.plugins.load(self.settings.plugins, {"worker": self, "database": self.db})
         logger.info("worker_started", worker=self.id)
         try:
             while not self.stopping:
@@ -79,9 +82,12 @@ class Worker:
                 task.cancel()
             await asyncio.gather(*self.tasks, return_exceptions=True)
             await self.db.unlock("schedule-controller", self.id)
+            await self.db.unlock(f"worker:{self.id}", self.id)
+            await self.plugins.close()
             logger.info("worker_stopped", worker=self.id)
 
     async def tick(self):
+        await self.db.lock(f"worker:{self.id}", self.id, self.settings.lease_seconds)
         if await self.db.lock("schedule-controller", self.id, self.settings.lease_seconds):
             await self.db.recover()
             await self.scheduler.tick()
@@ -93,12 +99,21 @@ class Worker:
                 break
             task = asyncio.create_task(self.execute(run))
             self.tasks.add(task)
-            task.add_done_callback(self.tasks.discard)
+            task.add_done_callback(self.task_finished)
+
+    def task_finished(self, task: asyncio.Task):
+        self.tasks.discard(task)
+        if not task.cancelled() and task.exception():
+            logger.error("run_finalization_failed", error=type(task.exception()).__name__)
 
     async def execute(self, run: dict):
         owner, identifier = run["owner"], run["id"]
         lease = self.settings.lease_seconds
-        if not await self.db.lock(run["resource"], owner, lease):
+        deployment = run["payload"]["kind"] == "deployment"
+        # External deployment APIs cannot honor our DB fence. An interrupted
+        # deployment therefore holds its environment until explicit reconciliation.
+        lock_ttl = 315360000 if deployment else lease
+        if not await self.db.lock(run["resource"], owner, lock_ttl):
             await self.db.owned(
                 identifier, owner, status="queued", owner=None, available=time.time() + 1, lease=0
             )
@@ -107,6 +122,13 @@ class Worker:
         current = asyncio.current_task()
 
         async def heartbeat():
+            try:
+                await renew_lease()
+            except Exception:
+                # Losing the coordination database must stop local execution.
+                current.cancel()
+
+        async def renew_lease():
             while True:
                 await asyncio.sleep(lease / 3)
                 fresh = await self.db.run(identifier)
@@ -114,7 +136,7 @@ class Worker:
                     not fresh
                     or fresh["cancel"]
                     or not await self.db.owned(identifier, owner, lease=time.time() + lease)
-                    or not await self.db.lock(run["resource"], owner, lease)
+                    or not await self.db.lock(run["resource"], owner, lock_ttl)
                 ):
                     current.cancel()
                     return
@@ -143,7 +165,28 @@ class Worker:
                 validate_deployment(target, payload["image"], run["project"])
                 if target.get("require_approval", True) and not payload.get("approved_by"):
                     raise ValueError("Approval is required")
+                previous = await self.db.get("environment", payload["target"])
+                if (
+                    previous
+                    and payload["source_created"] < previous["source_created"]
+                    and not payload.get("rollback")
+                ):
+                    raise ValueError(
+                        "A newer build has already been deployed. Request an explicit rollback."
+                    )
                 result = await deploy(target, payload["image"], stream.write)
+                await self.db.put(
+                    "environment",
+                    {
+                        "id": payload["target"],
+                        "project": run["project"],
+                        "image": payload["image"],
+                        "source_created": payload["source_created"],
+                        "source_run": payload["source_run"],
+                        "deployment_run": identifier,
+                    },
+                    previous["version"] if previous else 0,
+                )
                 status = "success"
             elif payload["kind"] == "notification":
                 try:
@@ -157,7 +200,9 @@ class Worker:
                 except httpx.HTTPError:
                     attempt = run["result"].get("attempt", 0) + 1
                     if attempt < 5:
-                        raise RetryScheduled({"attempt": attempt}, min(300, 5 * 2**attempt)) from None
+                        raise RetryScheduled(
+                            {"attempt": attempt}, min(300, 5 * 2**attempt)
+                        ) from None
                     raise
                 status = "success"
         except RetryScheduled as scheduled:
@@ -177,32 +222,39 @@ class Worker:
             await stream.write("", final=True)
             if retry:
                 committed = False
-                await self.db.owned(identifier, owner, status="queued", owner=None, lease=0,
-                    result=retry.result, available=time.time() + retry.delay)
+                await self.db.owned(
+                    identifier,
+                    owner,
+                    status="queued",
+                    owner=None,
+                    lease=0,
+                    result=retry.result,
+                    available=time.time() + retry.delay,
+                )
             else:
-                committed = await self.db.finish(identifier, owner, status, result)
-            await self.db.unlock(run["resource"], owner)
+                committed = await self.db.finish(
+                    identifier,
+                    owner,
+                    status,
+                    result,
+                    notify=bool(self.settings.notification_url)
+                    and run["payload"]["kind"] != "notification",
+                )
+            if not deployment or status == "success":
+                await self.db.unlock(run["resource"], owner)
             if committed:
                 await self.db.record_audit(
                     run["project"], f"worker:{self.id}", f"run.{status}", identifier
                 )
-                if self.settings.notification_url and run["payload"]["kind"] != "notification":
-                    await self.db.enqueue(
-                        run["project"],
-                        f"notify:{identifier}",
-                        {
-                            "kind": "notification",
-                            "message": {
-                                "run_id": identifier,
-                                "project": run["project"],
-                                "status": status,
-                            },
-                        },
-                        dedupe=f"notification:{identifier}",
-                    )
 
     async def execute_job(
-        self, job: Job, run: dict, stream: RedactedLog, step: str, source: Path | None = None
+        self,
+        job: Job,
+        run: dict,
+        stream: RedactedLog,
+        step: str,
+        source: Path | None = None,
+        inputs: dict[str, list[dict]] | None = None,
     ):
         if job.executor in {"shell", "python"} and not self.settings.allow_host_execution:
             raise ValueError(
@@ -216,15 +268,36 @@ class Worker:
         workspace = self.settings.data_dir.resolve() / "workspaces" / run["id"] / step
         workspace.mkdir(parents=True, exist_ok=True)
         if source:
-            await asyncio.to_thread(shutil.copytree, source, workspace, dirs_exist_ok=True)
+            await asyncio.to_thread(
+                shutil.copytree, source, workspace, dirs_exist_ok=True, symlinks=True
+            )
+        for dependency, artifacts in (inputs or {}).items():
+            for artifact in artifacts:
+                origin = (
+                    self.settings.data_dir.resolve()
+                    / "artifacts"
+                    / run["project"]
+                    / run["id"]
+                    / artifact["sha256"]
+                )
+                raw = await asyncio.to_thread(origin.read_bytes)
+                if hashlib.sha256(raw).hexdigest() != artifact["sha256"]:
+                    raise ValueError("Dependency artifact checksum does not match")
+                destination = (workspace / "inputs" / dependency / artifact["name"]).resolve()
+                if not destination.is_relative_to(workspace.resolve()):
+                    raise ValueError("Dependency artifact destination escapes the step workspace")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(destination.write_bytes, raw)
         environment = {}
         for reference in job.secret_refs:
             key = f"{job.project}/{reference}"
             if key not in self.settings.secrets:
                 raise ValueError(f"Secret reference not configured: {reference}")
             environment[reference] = self.settings.secrets[key]
-        attempts = []
-        for attempt in range(job.max_retries + 1):
+        attempts = (
+            list(run["result"].get("attempts", [])) if run["payload"]["kind"] == "job" else []
+        )
+        for attempt in range(len(attempts), job.max_retries + 1):
             await stream.write(f"\n[{step}] Attempt {attempt + 1}/{job.max_retries + 1}\n")
             started = time.time()
             code, _ = await get_executor(job.executor).execute(
@@ -237,11 +310,24 @@ class Worker:
                     "duration_seconds": round(time.time() - started, 3),
                 }
             )
+            await self.db.put(
+                "attempt",
+                {
+                    "id": f"{run['id']}.{step}.{attempt + 1}",
+                    "project": run["project"],
+                    "run_id": run["id"],
+                    "step": step,
+                    **attempts[-1],
+                },
+            )
             if code == 0 or attempt == job.max_retries:
                 break
             delay = min(3600, job.retry_delay_seconds * 2**attempt)
             await stream.write(f"[{step}] Retrying in approximately {delay}s\n")
-            await asyncio.sleep(delay + random.uniform(0, delay * 0.1))  # nosec B311 - retry jitter
+            delay += random.uniform(0, delay * 0.1)  # nosec B311 - retry jitter
+            if run["payload"]["kind"] == "job":
+                raise RetryScheduled({"attempts": attempts}, delay)
+            await asyncio.sleep(delay)
         artifacts = []
         if code == 0:
             for relative in job.artifact_paths:
@@ -260,8 +346,8 @@ class Worker:
                     / digest
                 )
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                await asyncio.to_thread(shutil.copyfile, path, destination)
-                artifacts.append({"name": path.name, "sha256": digest, "size": path.stat().st_size})
+                await asyncio.to_thread(destination.write_bytes, raw)
+                artifacts.append({"name": path.name, "sha256": digest, "size": len(raw)})
         return {
             "status": "success" if code == 0 else "timed_out" if code == -1 else "failed",
             "attempts": attempts,
@@ -317,7 +403,14 @@ class Worker:
             async def execute_step(step, limiter=semaphore):
                 async with limiter:
                     try:
-                        return await self.execute_job(step.job, run, stream, step.id, source)
+                        return await self.execute_job(
+                            step.job,
+                            run,
+                            stream,
+                            step.id,
+                            source,
+                            {name: results[name].get("artifacts", []) for name in step.needs},
+                        )
                     except Exception as exc:
                         await stream.write(f"[{step.id}] {type(exc).__name__}: {exc}\n")
                         return {"status": "failed", "error": "See run log"}

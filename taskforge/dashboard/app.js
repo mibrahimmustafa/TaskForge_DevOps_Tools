@@ -17,6 +17,7 @@ function el(tag,props={},...children){
  for(const [key,value] of Object.entries(props)){
   if(key.startsWith('on'))node.addEventListener(key.slice(2).toLowerCase(),value);
   else if(key==='className')node.className=value;
+  else if(key.startsWith('aria-')&&value!==undefined&&value!==null)node.setAttribute(key,String(value));
   else if(value!==undefined&&value!==null&&value!==false)node.setAttribute(key,value===true?'':value);
  }
  for(const child of children.flat())if(child!==null&&child!==undefined)node.append(child instanceof Node?child:document.createTextNode(String(child)));
@@ -58,7 +59,7 @@ async function refresh(notify=false){
  try{
  const [jobs,pipelines,runs,stats,targets,plugins]=await Promise.all([api('/jobs'),api('/pipelines'),api('/runs?limit=50&offset='+state.offset),api('/system/stats'),api('/deployments/targets'),api('/plugins')]);
  Object.assign(state,{jobs,pipelines,runs,stats,targets,plugins});if(isAdmin()&&state.page==='audit')state.audit=await api('/audit');
- $('connection-error').hidden=true;$('connection').textContent='Connected';$('updated').textContent='Updated '+new Date().toLocaleTimeString();renderContent();if(notify)toast('Workspace refreshed');
+ $('connection-error').hidden=true;$('connection').textContent=stats.workers_online?'Connected · '+stats.workers_online+' worker(s) online':'Connected · no workers online';$('updated').textContent='Updated '+new Date().toLocaleTimeString();renderContent();if(notify)toast('Workspace refreshed');
  }catch(error){$('connection-error').textContent='Unable to refresh: '+error.message+'. Showing the last confirmed data.';$('connection-error').hidden=false;$('connection').textContent='Connection interrupted';}
  finally{state.refreshing=false;$('refresh').disabled=false;}
 }
@@ -101,7 +102,7 @@ function jobsPage(content){
 }
 function runTable(runs){
  if(!runs.length)return empty('No executions yet','Run a job or pipeline to see its status, logs, and artifacts here.');
- return table(['Execution','Status','Created','Actions'],runs.map(run=>el('tr',{},nameCell(run.name,run.project+' · '+run.kind),cell(badge(run.status)),cell(date(run.created)),cell(button('Inspect',()=>openRun(run.id)),run.status==='waiting_approval'&&isAdmin()?button('Review',()=>reviewDeployment(run),'primary'):null))));
+ return table(['Execution','Status','Created','Actions'],runs.map(run=>el('tr',{},nameCell(run.name,run.project+' · '+run.kind),cell(badge(run.status)),cell(date(run.created)),cell(button('Inspect',()=>openRun(run.id)),run.status==='waiting_approval'&&isAdmin()?button('Review',()=>reviewDeployment(run),'primary'):null,run.kind==='deployment'&&['failed','cancelled','lost'].includes(run.status)&&isAdmin()?button('Reconcile',()=>reconcileDeployment(run)):null))));
 }
 function runsPage(content){
  content.append(filterToolbar('Search this page of executions'),panel('Execution history',runTable(filtered(state.runs)),'50 per page'));
@@ -196,7 +197,14 @@ function deploymentForm(){
  field('Successful source run','source_run',sources[0]?.id||'',{choices:sources.map(run=>[run.id,run.name+' · '+date(run.created)])}),
  field('Immutable image digest','image','',{required:true,hint:'repository/image@sha256:… Must match the source run’s release.json artifact.'}));
  if(!sources.length)content.append(el('p',{className:'error-text'},'No recent successful build has a release.json artifact. Publish one from a pipeline first.'));
- content.append(saveForm(form,async data=>{await api('/deployments',{method:'POST',body:JSON.stringify(Object.fromEntries(data))});toast('Deployment request recorded');},'Request deployment'));
+ if(isAdmin())form.append(field('Release intent','rollback','false',{choices:[['false','Deploy forward'],['true','Roll back to an older build']],hint:'Rollback still requires a successful source build and configured approval.'}));
+ content.append(saveForm(form,async data=>{const value=Object.fromEntries(data);value.rollback=value.rollback==='true';await api('/deployments',{method:'POST',body:JSON.stringify(value)});toast('Deployment request recorded');},'Request deployment'));
+}
+function reconcileDeployment(run){
+ const content=dialog('Reconcile interrupted deployment','ENVIRONMENT RECOVERY');
+ content.append(el('p',{},'Verify that the previous runner has stopped and inspect the current service and rollback state. Releasing this lock allows another deployment to this environment.'));
+ const form=el('form',{},field('Confirmation','confirmation','',{required:true,hint:'Type VERIFIED after completing those checks.'}));
+ content.append(saveForm(form,async data=>{if(data.get('confirmation')!=='VERIFIED')throw new Error('Type VERIFIED after checking the runner and target.');await api('/deployments/'+run.id+'/reconcile',{method:'POST',body:JSON.stringify({confirmed_stopped:true})});toast('Environment lock released');},'Release environment lock'));
 }
 function reviewDeployment(run){
  const content=dialog('Review deployment','APPROVAL REQUIRED');
@@ -224,8 +232,8 @@ async function openRun(id){
  artifacts.replaceChildren(...(run.result.artifacts||[]).map(artifact=>el('div',{className:'artifact'},el('div',{},artifact.name,el('small',{},'SHA256 '+artifact.sha256)),button('Download',async()=>{
  try{const response=await fetch('/api/runs/'+id+'/artifacts/'+artifact.sha256,{headers:{Authorization:'Bearer '+state.token}});if(!response.ok)throw new Error('Artifact download failed');download(await response.blob(),artifact.name);}catch(error){toast(error.message,true);}
  }))));
- actions.replaceChildren(button('Download log',()=>download(new Blob([output],{type:'text/plain'}),id+'.log')),!terminal.has(run.status)&&canOperate()?button(run.cancel?'Cancellation requested':'Cancel execution',async()=>{await action('/runs/'+id+'/cancel',undefined,'Cancellation requested');update();},'danger',run.cancel):null);
- if(terminal.has(run.status)&&!log.has_more)close();
+ actions.replaceChildren(...[button('Download log',()=>download(new Blob([output],{type:'text/plain'}),id+'.log')),!terminal.has(run.status)&&canOperate()?button(run.cancel?'Cancellation requested':'Cancel execution',async()=>{await action('/runs/'+id+'/cancel',undefined,'Cancellation requested');update();},'danger',run.cancel):null].filter(Boolean));
+ if(terminal.has(run.status)&&!log.has_more){close();refresh();}
  }catch(error){logs.textContent='Could not refresh execution: '+error.message;}finally{busy=false;}
  }
  const timer=setInterval(update,1500);await update();

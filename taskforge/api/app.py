@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from taskforge.api.auth import validate_tokens
+from taskforge.api.limits import BodyLimitMiddleware
 from taskforge.api.routers import deployments, jobs, pipelines, plugins, runs, system, triggers
 from taskforge.core.config import Settings, get_settings
 from taskforge.core.logging import setup_logging
@@ -67,8 +68,6 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
-        if int(request.headers.get("content-length", "0")) > 1024 * 1024:
-            return JSONResponse({"detail": "Request exceeds 1 MiB"}, status_code=413)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
@@ -80,6 +79,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         if request.url.path.startswith("/api"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    app.add_middleware(BodyLimitMiddleware)
 
     app.include_router(system.router)
     for module in (jobs, runs, pipelines, deployments, triggers, plugins):

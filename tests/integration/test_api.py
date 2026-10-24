@@ -179,3 +179,12 @@ async def test_health_security_headers_and_no_fake_extensions(client):
     assert (await client.get("/api/runs?limit=-1")).status_code == 422
     assert (await client.get("/api/system/env")).json()["storage"] in {"sqlite", "postgresql"}
     assert (await client.post("/api/plugins/git_trigger/toggle")).status_code == 404
+
+
+async def test_streaming_request_size_is_bounded(client):
+    async def oversized_body():
+        for _ in range(17):
+            yield b"x" * 65536
+
+    response = await client.post("/api/jobs", content=oversized_body())
+    assert response.status_code == 413

@@ -2,9 +2,9 @@ import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Request, Response
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, generate_latest
 
 from taskforge.api.auth import Principal, authenticate
-from taskforge.core.metrics import get_metrics_data
 
 router = APIRouter(tags=["System"])
 START_TIME = time.time()
@@ -35,8 +35,16 @@ async def metrics(request: Request, principal: Principal = Depends(authenticate)
     principal.check("default", "admin")
     if not request.app.state.settings.metrics_enabled:
         return Response(status_code=404)
-    data, content_type = get_metrics_data()
-    return Response(content=data, media_type=content_type)
+    registry = CollectorRegistry()
+    counts = await request.app.state.db.stats(principal.scope)
+    runs = Gauge("taskforge_runs", "Persisted executions by status", ["status"], registry=registry)
+    for status, count in counts.items():
+        runs.labels(status=status).set(count)
+    workers = Gauge(
+        "taskforge_workers_online", "Workers with a current heartbeat", registry=registry
+    )
+    workers.set(await request.app.state.db.worker_count())
+    return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/api/session")
@@ -54,6 +62,7 @@ async def system_stats(request: Request, principal: Principal = Depends(authenti
         "total_runs": sum(counts.values()),
         "statuses": counts,
         "uptime_seconds": round(time.time() - START_TIME),
+        "workers_online": await request.app.state.db.worker_count(),
     }
 
 

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "taskforge"
 version = "0.2.0"
-description = "Production-grade, extensible DevOps task scheduler"
+description = "Extensible CI/CD pipelines and DevOps task automation"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

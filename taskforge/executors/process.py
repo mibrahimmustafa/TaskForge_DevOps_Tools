@@ -12,20 +12,12 @@ LogSink = Callable[[str], Awaitable[None]]
 MAX_OUTPUT = 2 * 1024 * 1024
 
 
-async def terminate(proc):
-    if proc.returncode is not None:
-        return
+async def terminate(proc, group=None):
     if sys.platform == "win32":
-        killer = await asyncio.create_subprocess_exec(
-            "taskkill",
-            "/PID",
-            str(proc.pid),
-            "/T",
-            "/F",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await killer.wait()
+        if group:
+            group.terminate()
+        elif proc.returncode is None:
+            proc.kill()
     else:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -55,6 +47,18 @@ async def run_process(
         stderr=asyncio.subprocess.STDOUT,
         start_new_session=sys.platform != "win32",
     )
+    group = None
+    if sys.platform == "win32":
+        from taskforge.executors.windows_job import WindowsJob
+
+        try:
+            group = WindowsJob(proc.pid)
+        except OSError:
+            # Fast commands may already have exited before OpenProcess.
+            await asyncio.sleep(0)
+            if proc.returncode is None:
+                await terminate(proc)
+                raise
     chunks = []
     size = 0
 
@@ -86,14 +90,19 @@ async def run_process(
             await reader
         return proc.returncode or 0, "".join(chunks)
     except TimeoutError:
-        await terminate(proc)
+        await terminate(proc, group)
         await asyncio.gather(reader, return_exceptions=True)
         message = f"\n[TIMEOUT] Workload timed out after {timeout} seconds.\n"
         if sink:
             await sink(message)
         return -1, "".join(chunks) + message
     except BaseException:
-        await terminate(proc)
+        await terminate(proc, group)
         reader.cancel()
         await asyncio.gather(reader, return_exceptions=True)
         raise
+    finally:
+        # Successful parent exit must not leave detached descendants running.
+        await terminate(proc, group)
+        if group:
+            group.close()

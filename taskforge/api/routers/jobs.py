@@ -3,7 +3,7 @@ import hashlib
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from taskforge.api.auth import Principal, authenticate
-from taskforge.jobs.models import Job
+from taskforge.jobs.models import Job, JobStatus
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -79,7 +79,7 @@ async def change_schedule(
     if action not in {"pause", "resume"}:
         raise HTTPException(404, "Unknown action")
     job = await find_job(request, job_id, principal, "operator")
-    job.status = "paused" if action == "pause" else "active"
+    job.status = JobStatus.PAUSED if action == "pause" else JobStatus.ACTIVE
     saved = await request.app.state.scheduler.add_or_update_job(job)
     await request.app.state.db.record_audit(job.project, principal.name, f"job.{action}", job.id)
     return saved.to_dict()

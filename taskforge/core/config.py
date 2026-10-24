@@ -15,16 +15,17 @@ class Settings(BaseModel):
     log_level: str = "info"
     metrics_enabled: bool = True
     cors_origins: list[str] = Field(default_factory=list)
-    tokens: list[dict] = Field(default_factory=list)
+    tokens: list[dict] = Field(default_factory=list, repr=False)
     data_dir: Path = Path(".taskforge")
     worker_concurrency: int = Field(default=2, ge=1, le=32)
     lease_seconds: int = Field(default=30, ge=6)
     allow_host_execution: bool = False
     allowed_http_hosts: list[str] = Field(default_factory=list)
-    github_secret: str = ""
+    github_secret: str = Field(default="", repr=False)
     github_repositories: list[str] = Field(default_factory=list)
     deployment_targets: dict[str, dict] = Field(default_factory=dict)
-    secrets: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict, repr=False)
+    plugins: list[str] = Field(default_factory=list)
     notification_url: str = ""
     embedded_worker: bool = False  # Explicit development/test option only.
 
@@ -45,6 +46,7 @@ def get_settings() -> Settings:
             "github_repositories",
             "deployment_targets",
             "secrets",
+            "plugins",
         }:
             values[name] = json.loads(raw)
         else:

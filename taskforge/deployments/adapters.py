@@ -31,6 +31,17 @@ def validate_deployment(target: dict, image: str, project: str):
 
 
 async def deploy(target: dict, image: str, sink):
+    async def verify_http_health():
+        async with httpx.AsyncClient(timeout=3, follow_redirects=False, trust_env=False) as client:
+            for _ in range(20):
+                try:
+                    if (await client.get(target["health_url"])).is_success:
+                        return True
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(2)
+        return False
+
     async def command(args, timeout=180, check=True):
         env = {}
         if target.get("kubeconfig"):
@@ -127,18 +138,7 @@ async def deploy(target: dict, image: str, sink):
                 image,
             ]
         )
-        healthy = False
-        async with httpx.AsyncClient(timeout=3, follow_redirects=False, trust_env=False) as client:
-            for _ in range(20):
-                try:
-                    response = await client.get(target["health_url"])
-                    if response.is_success:
-                        healthy = True
-                        break
-                except httpx.HTTPError:
-                    pass
-                await asyncio.sleep(2)
-        if not healthy:
+        if not await verify_http_health():
             raise RuntimeError("Deployment health check failed")
         if renamed:
             await command(["docker", "rm", backup])
@@ -151,4 +151,8 @@ async def deploy(target: dict, image: str, sink):
             await command(["docker", "rename", backup, name])
         if previous:
             await command(["docker", "start", name])
+            if not await verify_http_health():
+                raise RuntimeError(
+                    "Previous Docker container restarted but recovery health check failed"
+                ) from None
         raise

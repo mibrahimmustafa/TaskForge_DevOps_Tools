@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -56,8 +56,10 @@ class Job(BaseModel):
     command: str = Field(default="echo 'Hello from TaskForge'", max_length=100000)
     image: str | None = None
     args: list[str] = Field(default_factory=list)
-    secret_refs: list[str] = Field(default_factory=list)
-    artifact_paths: list[str] = Field(default_factory=list)
+    secret_refs: list[Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]] = Field(
+        default_factory=list, max_length=50
+    )
+    artifact_paths: list[str] = Field(default_factory=list, max_length=50)
     status: JobStatus = JobStatus.ACTIVE
     tags: list[str] = Field(default_factory=list, max_length=30)
     timeout_seconds: int = Field(default=300, ge=1, le=86400)
