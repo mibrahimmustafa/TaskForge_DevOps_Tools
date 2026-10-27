@@ -38,6 +38,7 @@ Do not describe planned features as implemented. Do not substitute simulated job
 - Terminal run state and completion notification queue committed in one transaction.
 - Dynamic database user provisioning and authentication with role hierarchy (admin, operator, viewer), project scoping, token generation, rotation, and revocation.
 - Declarative YAML/JSON task definitions (jobs and multi-step DAG pipelines), multi-document streaming (`---`), sensitive secret redaction on export, dry-run syntax/schema validation, and `taskforge apply` CLI support.
+- Docker Compose orchestration (`docker/docker-compose.yml`) coupling API, background execution worker, and PostgreSQL database with shared artifacts volume, environment interpolation fallback (`POSTGRES_PASSWORD`), and directory-local `.env` configuration.
 
 ## User experience
 

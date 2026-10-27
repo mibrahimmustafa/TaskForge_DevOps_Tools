@@ -1,231 +1,240 @@
-TaskForge 0.4 - Installation, validation, and operations
-=====================================================
-
-1. Prerequisites
-   Python 3.11+ and pip. Git for repository checkout.
-   Optional: PostgreSQL 16+, Docker engine/CLI, kubectl and cluster credentials.
-   Execute commands from the repository root.
-   On PowerShell, virtual-environment activation is optional: use explicit paths below.
-   On Linux/macOS replace .venv\Scripts\ with .venv/bin/.
-
-2. Install and generate private configuration
-   python -m venv .venv
-   .\.venv\Scripts\python.exe -m pip install -e ".[dev,postgres,browser]"
-   .\.venv\Scripts\taskforge.exe init
-
-   init creates .taskforge/config.env with separate administrator and release-reviewer
-   tokens and refuses to overwrite an existing file. It also provisions an initial
-   admin unlock secret in .taskforge/secrets/initialAdminPassword for first-run setup.
-   Keep these files private. Protect their ACL / Unix permissions. Never commit them.
-   Existing deployments should rotate any credentials previously committed to Git.
-
-3. Configure
-   Add needed settings from .env.example to .taskforge/config.env.
-   Process environment takes precedence over config.env, which takes precedence over .env.
-   JSON settings should occupy one line and be single-quoted in dotenv files.
-
-   Local storage:
-     TASKFORGE_STORAGE_URL=sqlite+aiosqlite:///taskforge.db
-     TASKFORGE_DATA_DIR=.taskforge
-
-   PostgreSQL:
-     TASKFORGE_STORAGE_URL=postgresql+asyncpg://USER:URL_ENCODED_PASSWORD@HOST:5432/taskforge
-
-   Use an absolute shared TASKFORGE_DATA_DIR for API and workers on separate processes/hosts.
-   Back up PostgreSQL and the artifact directory together.
-   Jobs/pipelines have globally unique IDs within each definition kind.
-
-4. Start processes and First-Run Setup Wizard
-   Terminal A:
-     .\.venv\Scripts\taskforge.exe server start
-   Terminal B:
-     .\.venv\Scripts\taskforge.exe worker start
-
-   Open http://127.0.0.1:8080/.
-   On first launch, you can sign in directly using the administrator token from config.env,
-   or switch to the "Setup Wizard" tab, enter the unlock password from
-   .taskforge/secrets/initialAdminPassword, create your initial administrator account,
-   and install standard tools.
-   
-   Check /ready and the dashboard's online worker indicator.
-   A ready API without an online worker queues work but cannot execute it.
-   Configuration changes require restarting affected processes.
-
-   Shell/Python jobs:
-     Set TASKFORGE_ALLOW_HOST_EXECUTION=true on a trusted, isolated worker.
-     Do not enable this for untrusted code.
-
-   Docker jobs:
-     Install Docker CLI and provide access to the intended engine on the worker.
-     Use prebuilt dependency images; job containers run without network access.
-     Docker bind mounts must resolve on the Docker daemon host.
-
-   HTTP jobs:
-     Configure TASKFORGE_ALLOWED_HTTP_HOSTS='["api.example.com"]'.
-     Redirects and ambient proxy environment settings are not followed.
-
-5. Declarative YAML task definitions & CLI apply
-   Define jobs and multi-step DAG pipelines cleanly in YAML or JSON without escaping quotes.
-   Multiple documents separated by `---` are automatically parsed and persisted.
-
-   Via Dashboard:
-     - Click '📄 Add from YAML' on either the Jobs or Pipelines view.
-     - Choose from quick templates (Python cron, Docker task, Shell archiver, CI/CD pipeline).
-     - Click '🔍 Validate YAML' to dry-run syntax and schema validation before applying.
-     - Click 'Apply task definition' to persist directly into the database.
-     - In table and card rows, click 'YAML' to open the export modal with 1-click clipboard copy
-       or direct .yaml file download.
-     - When editing pipelines, definitions load in YAML and save directly via /api/pipelines/yaml.
-
-   Via CLI:
-     Set $env:TASKFORGE_API_TOKEN to your administrator or operator token.
-     Apply task file (supports .yaml, .yml, and .json):
-       .\.venv\Scripts\taskforge.exe apply examples/hello_world_job.yaml
-       .\.venv\Scripts\taskforge.exe apply examples/artifact-pipeline.yaml
-     Create from YAML:
-       .\.venv\Scripts\taskforge.exe jobs create examples/hello_world_job.yaml
-       .\.venv\Scripts\taskforge.exe pipelines create examples/artifact-pipeline.yaml
-     Export YAML definition:
-       .\.venv\Scripts\taskforge.exe jobs yaml job-hello-world
-       .\.venv\Scripts\taskforge.exe pipelines yaml artifact-demo
-
-6. User and access management
-   Administrators can provision dynamic team users with distinct roles and project scopes.
-   Three roles are enforced across all endpoints and UI actions:
-     - admin: Full control over job/pipeline authoring, deployments, user management, and audit records.
-     - operator: Execution privileges (trigger runs, pause/resume jobs, cancel, deployment promotion).
-     - viewer: Read-only visibility into pipeline graphs, execution timeline, streaming logs, and artifacts.
-
-   Via Dashboard:
-     Navigate to 'Users & access' in the sidebar as an admin, click '+ Add user', specify the
-     username, role, and project scopes ('*' for all or comma-separated project IDs).
-     Copy the generated token immediately from the confirmation dialog.
-
-   Via CLI:
-     Set $env:TASKFORGE_API_TOKEN to your admin token.
-     List users:
-       .\.venv\Scripts\taskforge.exe users list
-     Add user:
-       .\.venv\Scripts\taskforge.exe users create <username> --role operator --projects "default,staging"
-     Revoke user:
-       .\.venv\Scripts\taskforge.exe users delete <username>
-
-7. Freestyle Multi-Step Builds & Parameterization
-   TaskForge supports Jenkins Freestyle-style sequential multi-step build jobs.
-   Each build allocates a monotonically increasing sequential build number (#1, #2, #3...).
-   
-   Freestyle features:
-     - Multi-step execution: Define sequential steps with independent executors and commands.
-     - Workspace persistence: Executed within .taskforge/workspaces/<job_id>/.
-     - Workspace Explorer: Inspect files via GET /api/jobs/{id}/workspace, view file contents
-       at /workspace/file, or wipe the workspace clean at POST /api/jobs/{id}/workspace/wipe.
-     - Concurrency control: Set concurrent_builds: false to serialize executions with a per-job mutex.
-     - Quiet period: Set quiet_period_seconds to delay execution in the queue.
-     - Build parameters: Define parameters of type choice, string, boolean, text, or password.
-       Injected into environment variables (e.g., $ENV:TARGET_ENV) during run execution.
-     - Permalinks: Direct permanent links to /permalinks/last, /permalinks/lastSuccessful,
-       /permalinks/lastFailed, and /permalinks/lastStable runs and their artifacts.
-     - Keep this build forever: Toggle keep_forever on critical release runs to protect them
-       from automated retention purging.
-
-8. CLI Build Execution, Console & Artifact Inspection
-   The TaskForge CLI allows full terminal-based build triggering and log streaming:
-   
-   Trigger build with parameters and live follow:
-     .\.venv\Scripts\taskforge.exe build job-freestyle --param TARGET_ENV=staging --follow
-   
-   Trigger build and wait for exit status:
-     .\.venv\Scripts\taskforge.exe build job-freestyle --wait
-   
-   Stream live console log:
-     .\.venv\Scripts\taskforge.exe console <run_id> --follow
-   
-   List archived artifacts for a run:
-     .\.venv\Scripts\taskforge.exe artifacts <run_id>
-
-9. Advanced Triggers & Automation
-   - Deterministic Jenkins H-Cron:
-     Spread execution load across time using H notation:
-       trigger_expr: "H/15 * * * *"       # Every 15 minutes, hashed by job ID
-       trigger_expr: "H(0-29)/10 * * * *"  # In the first 30 min, every 10 min
-       trigger_expr: "H H(0-7) * * *"      # Nightly between midnight and 7 AM
-   - Upstream / Downstream Build Triggers:
-     Trigger downstream jobs automatically on completion:
-       downstream_triggers:
-         - target_job_id: "deploy-job"
-           condition: "SUCCESS"   # SUCCESS, UNSTABLE, or ALWAYS
-     Preserves upstream cause lineage in run records.
-
-10. Artifact Archiving, Fingerprints & LogRotator Retention
-    - Artifact Archiving with Globs:
-      Specify artifact_paths and artifact_exclude_paths using Ant/glob patterns
-      (e.g., target/**/*.jar, dist/*.tar.gz). Files are archived to .taskforge/artifacts/
-      with byte sizes and SHA-256 digests.
-    - Fingerprints & Lineage:
-      Record MD5 and SHA-256 digests for cross-job artifact provenance tracking
-      via GET /api/fingerprints/{hash}.
-    - Build Retention (LogRotator):
-      Configure retention_max_builds and retention_days on jobs. Old builds and their
-      work directories are automatically pruned while strictly preserving runs flagged
-      with keep_forever and permalink milestone builds.
-      Trigger manual retention: POST /api/jobs/{id}/retention/run.
-    - Global Tool Installations:
-      Manage named tools (Maven, NodeJS, Go, Python) via /api/tools. Selected job tools
-      have their directories automatically prepended to the worker process PATH.
-
-11. Remote API & Tree Filtering
-    TaskForge supports Jenkins-compatible ?tree= remote API queries for lightweight data extraction:
-      GET /api/jobs?tree=id,name,enabled
-      GET /api/runs?tree=id,build_number,status,parameters
-      GET /api/jobs/job-freestyle?tree=name,steps[name,executor],downstream_triggers[target_job_id]
-
-12. Docker Compose API/worker/PostgreSQL
-    Run init first. In PowerShell set a long URL-safe password without printing it:
-      $env:POSTGRES_PASSWORD = .\.venv\Scripts\taskforge.exe token
-      docker compose -f docker/docker-compose.yml up --build -d
-      docker compose -f docker/docker-compose.yml ps
-
-    Store the password securely and reuse it when operating this Compose project.
-    Do not use "down -v" unless intentionally deleting the database/artifact volumes.
-    The API binds to 127.0.0.1:8080. Put TLS and access controls at your reverse proxy.
-    The default Compose worker can run allowlisted HTTP jobs, or trusted Python/shell
-    workloads if explicitly enabled. Both services share the artifacts volume.
-
-13. Tests
-    .\.venv\Scripts\ruff.exe check .
-    .\.venv\Scripts\ruff.exe format --check .
-    .\.venv\Scripts\mypy.exe taskforge
-    .\.venv\Scripts\bandit.exe -r taskforge -c pyproject.toml --severity-level medium
-    .\.venv\Scripts\pytest.exe -q tests
-    .\.venv\Scripts\python.exe -m build
-
-    Browser tests:
-      .\.venv\Scripts\python.exe -m playwright install chromium
-      $env:TASKFORGE_BROWSER_TESTS = "1"
-      .\.venv\Scripts\pytest.exe -q tests/browser
-      Remove-Item Env:TASKFORGE_BROWSER_TESTS
-    Screenshots are written to ignored test-results/.
-
-    Phase 1 & Phase 2 Integration Tests:
-      .\.venv\Scripts\pytest.exe -q tests/integration/test_jenkins_core_phase1.py
-      .\.venv\Scripts\pytest.exe -q tests/integration/test_jenkins_core_phase2.py
-
-    PostgreSQL tests (use a disposable database, never production):
-      $env:TASKFORGE_TEST_POSTGRES_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/TEST_DB"
-      .\.venv\Scripts\pytest.exe tests/integration
-      Remove-Item Env:TASKFORGE_TEST_POSTGRES_URL
-
-    Live Docker tests:
-      $env:TASKFORGE_DOCKER_TESTS = "1"
-      .\.venv\Scripts\pytest.exe tests/integration/test_docker_live.py
-      Remove-Item Env:TASKFORGE_DOCKER_TESTS
-
-14. Operational checks
-    /health: API liveness. /ready: database connectivity.
-    /api/system/setup-status: setup wizard status.
-    /metrics: bearer-authenticated admin metrics from persisted run states.
-    Run lost: inspect side effects, then submit a new reviewed run.
-    Logs: bounded per execution attempt/claim; configured secret values are redacted.
-    Artifacts: 50 MiB per file, <=50 declared paths; contents are not secret-scanned.
-    Plan retention and capacity monitoring for database logs, workspaces, and artifacts.
-    Take coordinated backups and prove restore in a disposable environment.
+TaskForge 0.4 - Installation, validation, and operations
+=====================================================
+
+1. Prerequisites
+   Python 3.11+ and pip. Git for repository checkout.
+   Optional: PostgreSQL 16+, Docker engine/CLI, kubectl and cluster credentials.
+   Execute commands from the repository root.
+   On PowerShell, virtual-environment activation is optional: use explicit paths below.
+   On Linux/macOS replace .venv\Scripts\ with .venv/bin/.
+
+2. Install and generate private configuration
+   python -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -e ".[dev,postgres,browser]"
+   .\.venv\Scripts\taskforge.exe init
+
+   init creates .taskforge/config.env with separate administrator and release-reviewer
+   tokens and refuses to overwrite an existing file. It also provisions an initial
+   admin unlock secret in .taskforge/secrets/initialAdminPassword for first-run setup.
+   Keep these files private. Protect their ACL / Unix permissions. Never commit them.
+   Existing deployments should rotate any credentials previously committed to Git.
+
+3. Configure
+   Add needed settings from .env.example to .taskforge/config.env.
+   Process environment takes precedence over config.env, which takes precedence over .env.
+   JSON settings should occupy one line and be single-quoted in dotenv files.
+
+   Local storage:
+     TASKFORGE_STORAGE_URL=sqlite+aiosqlite:///taskforge.db
+     TASKFORGE_DATA_DIR=.taskforge
+
+   PostgreSQL:
+     TASKFORGE_STORAGE_URL=postgresql+asyncpg://USER:URL_ENCODED_PASSWORD@HOST:5432/taskforge
+
+   Use an absolute shared TASKFORGE_DATA_DIR for API and workers on separate processes/hosts.
+   Back up PostgreSQL and the artifact directory together.
+   Jobs/pipelines have globally unique IDs within each definition kind.
+
+4. Start processes and First-Run Setup Wizard
+   Terminal A:
+     .\.venv\Scripts\taskforge.exe server start
+   Terminal B:
+     .\.venv\Scripts\taskforge.exe worker start
+
+   Open http://127.0.0.1:8080/.
+   On first launch, you can sign in directly using the administrator token from config.env,
+   or switch to the "Setup Wizard" tab, enter the unlock password from
+   .taskforge/secrets/initialAdminPassword, create your initial administrator account,
+   and install standard tools.
+   
+   Check /ready and the dashboard's online worker indicator.
+   A ready API without an online worker queues work but cannot execute it.
+   Configuration changes require restarting affected processes.
+
+   Shell/Python jobs:
+     Set TASKFORGE_ALLOW_HOST_EXECUTION=true on a trusted, isolated worker.
+     Do not enable this for untrusted code.
+
+   Docker jobs:
+     Install Docker CLI and provide access to the intended engine on the worker.
+     Use prebuilt dependency images; job containers run without network access.
+     Docker bind mounts must resolve on the Docker daemon host.
+
+   HTTP jobs:
+     Configure TASKFORGE_ALLOWED_HTTP_HOSTS='["api.example.com"]'.
+     Redirects and ambient proxy environment settings are not followed.
+
+5. Declarative YAML task definitions & CLI apply
+   Define jobs and multi-step DAG pipelines cleanly in YAML or JSON without escaping quotes.
+   Multiple documents separated by `---` are automatically parsed and persisted.
+
+   Via Dashboard:
+     - Click '📄 Add from YAML' on either the Jobs or Pipelines view.
+     - Choose from quick templates (Python cron, Docker task, Shell archiver, CI/CD pipeline).
+     - Click '🔍 Validate YAML' to dry-run syntax and schema validation before applying.
+     - Click 'Apply task definition' to persist directly into the database.
+     - In table and card rows, click 'YAML' to open the export modal with 1-click clipboard copy
+       or direct .yaml file download.
+     - When editing pipelines, definitions load in YAML and save directly via /api/pipelines/yaml.
+
+   Via CLI:
+     Set $env:TASKFORGE_API_TOKEN to your administrator or operator token.
+     Apply task file (supports .yaml, .yml, and .json):
+       .\.venv\Scripts\taskforge.exe apply examples/hello_world_job.yaml
+       .\.venv\Scripts\taskforge.exe apply examples/artifact-pipeline.yaml
+     Create from YAML:
+       .\.venv\Scripts\taskforge.exe jobs create examples/hello_world_job.yaml
+       .\.venv\Scripts\taskforge.exe pipelines create examples/artifact-pipeline.yaml
+     Export YAML definition:
+       .\.venv\Scripts\taskforge.exe jobs yaml job-hello-world
+       .\.venv\Scripts\taskforge.exe pipelines yaml artifact-demo
+
+6. User and access management
+   Administrators can provision dynamic team users with distinct roles and project scopes.
+   Three roles are enforced across all endpoints and UI actions:
+     - admin: Full control over job/pipeline authoring, deployments, user management, and audit records.
+     - operator: Execution privileges (trigger runs, pause/resume jobs, cancel, deployment promotion).
+     - viewer: Read-only visibility into pipeline graphs, execution timeline, streaming logs, and artifacts.
+
+   Via Dashboard:
+     Navigate to 'Users & access' in the sidebar as an admin, click '+ Add user', specify the
+     username, role, and project scopes ('*' for all or comma-separated project IDs).
+     Copy the generated token immediately from the confirmation dialog.
+
+   Via CLI:
+     Set $env:TASKFORGE_API_TOKEN to your admin token.
+     List users:
+       .\.venv\Scripts\taskforge.exe users list
+     Add user:
+       .\.venv\Scripts\taskforge.exe users create <username> --role operator --projects "default,staging"
+     Revoke user:
+       .\.venv\Scripts\taskforge.exe users delete <username>
+
+7. Freestyle Multi-Step Builds & Parameterization
+   TaskForge supports Jenkins Freestyle-style sequential multi-step build jobs.
+   Each build allocates a monotonically increasing sequential build number (#1, #2, #3...).
+   
+   Freestyle features:
+     - Multi-step execution: Define sequential steps with independent executors and commands.
+     - Workspace persistence: Executed within .taskforge/workspaces/<job_id>/.
+     - Workspace Explorer: Inspect files via GET /api/jobs/{id}/workspace, view file contents
+       at /workspace/file, or wipe the workspace clean at POST /api/jobs/{id}/workspace/wipe.
+     - Concurrency control: Set concurrent_builds: false to serialize executions with a per-job mutex.
+     - Quiet period: Set quiet_period_seconds to delay execution in the queue.
+     - Build parameters: Define parameters of type choice, string, boolean, text, or password.
+       Injected into environment variables (e.g., $ENV:TARGET_ENV) during run execution.
+     - Permalinks: Direct permanent links to /permalinks/last, /permalinks/lastSuccessful,
+       /permalinks/lastFailed, and /permalinks/lastStable runs and their artifacts.
+     - Keep this build forever: Toggle keep_forever on critical release runs to protect them
+       from automated retention purging.
+
+8. CLI Build Execution, Console & Artifact Inspection
+   The TaskForge CLI allows full terminal-based build triggering and log streaming:
+   
+   Trigger build with parameters and live follow:
+     .\.venv\Scripts\taskforge.exe build job-freestyle --param TARGET_ENV=staging --follow
+   
+   Trigger build and wait for exit status:
+     .\.venv\Scripts\taskforge.exe build job-freestyle --wait
+   
+   Stream live console log:
+     .\.venv\Scripts\taskforge.exe console <run_id> --follow
+   
+   List archived artifacts for a run:
+     .\.venv\Scripts\taskforge.exe artifacts <run_id>
+
+9. Advanced Triggers & Automation
+   - Deterministic Jenkins H-Cron:
+     Spread execution load across time using H notation:
+       trigger_expr: "H/15 * * * *"       # Every 15 minutes, hashed by job ID
+       trigger_expr: "H(0-29)/10 * * * *"  # In the first 30 min, every 10 min
+       trigger_expr: "H H(0-7) * * *"      # Nightly between midnight and 7 AM
+   - Upstream / Downstream Build Triggers:
+     Trigger downstream jobs automatically on completion:
+       downstream_triggers:
+         - target_job_id: "deploy-job"
+           condition: "SUCCESS"   # SUCCESS, UNSTABLE, or ALWAYS
+     Preserves upstream cause lineage in run records.
+
+10. Artifact Archiving, Fingerprints & LogRotator Retention
+    - Artifact Archiving with Globs:
+      Specify artifact_paths and artifact_exclude_paths using Ant/glob patterns
+      (e.g., target/**/*.jar, dist/*.tar.gz). Files are archived to .taskforge/artifacts/
+      with byte sizes and SHA-256 digests.
+    - Fingerprints & Lineage:
+      Record MD5 and SHA-256 digests for cross-job artifact provenance tracking
+      via GET /api/fingerprints/{hash}.
+    - Build Retention (LogRotator):
+      Configure retention_max_builds and retention_days on jobs. Old builds and their
+      work directories are automatically pruned while strictly preserving runs flagged
+      with keep_forever and permalink milestone builds.
+      Trigger manual retention: POST /api/jobs/{id}/retention/run.
+    - Global Tool Installations:
+      Manage named tools (Maven, NodeJS, Go, Python) via /api/tools. Selected job tools
+      have their directories automatically prepended to the worker process PATH.
+
+11. Remote API & Tree Filtering
+    TaskForge supports Jenkins-compatible ?tree= remote API queries for lightweight data extraction:
+      GET /api/jobs?tree=id,name,enabled
+      GET /api/runs?tree=id,build_number,status,parameters
+      GET /api/jobs/job-freestyle?tree=name,steps[name,executor],downstream_triggers[target_job_id]
+
+12. Docker Compose API/worker/PostgreSQL
+    Run init first. You can run Docker Compose from either the project root or the docker/ directory:
+
+    Option A (from workspace root):
+      $env:POSTGRES_PASSWORD = .\.venv\Scripts\taskforge.exe token  # or configure in .env
+      docker compose -f docker/docker-compose.yml up --build -d
+      docker compose -f docker/docker-compose.yml ps
+
+    Option B (from docker/ directory):
+      cd docker
+      docker compose up --build -d
+      docker compose ps
+
+    The compose file includes a secure default fallback and reads from docker/.env or root .env.
+
+    Store the password securely and reuse it when operating this Compose project.
+    Do not use "down -v" unless intentionally deleting the database/artifact volumes.
+    The API binds to 127.0.0.1:8080. Put TLS and access controls at your reverse proxy.
+    The default Compose worker can run allowlisted HTTP jobs, or trusted Python/shell
+    workloads if explicitly enabled. Both services share the artifacts volume.
+
+13. Tests
+    .\.venv\Scripts\ruff.exe check .
+    .\.venv\Scripts\ruff.exe format --check .
+    .\.venv\Scripts\mypy.exe taskforge
+    .\.venv\Scripts\bandit.exe -r taskforge -c pyproject.toml --severity-level medium
+    .\.venv\Scripts\pytest.exe -q tests
+    .\.venv\Scripts\python.exe -m build
+
+    Browser tests:
+      .\.venv\Scripts\python.exe -m playwright install chromium
+      $env:TASKFORGE_BROWSER_TESTS = "1"
+      .\.venv\Scripts\pytest.exe -q tests/browser
+      Remove-Item Env:TASKFORGE_BROWSER_TESTS
+    Screenshots are written to ignored test-results/.
+
+    Phase 1 & Phase 2 Integration Tests:
+      .\.venv\Scripts\pytest.exe -q tests/integration/test_jenkins_core_phase1.py
+      .\.venv\Scripts\pytest.exe -q tests/integration/test_jenkins_core_phase2.py
+
+    PostgreSQL tests (use a disposable database, never production):
+      $env:TASKFORGE_TEST_POSTGRES_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/TEST_DB"
+      .\.venv\Scripts\pytest.exe tests/integration
+      Remove-Item Env:TASKFORGE_TEST_POSTGRES_URL
+
+    Live Docker tests:
+      $env:TASKFORGE_DOCKER_TESTS = "1"
+      .\.venv\Scripts\pytest.exe tests/integration/test_docker_live.py
+      Remove-Item Env:TASKFORGE_DOCKER_TESTS
+
+14. Operational checks
+    /health: API liveness. /ready: database connectivity.
+    /api/system/setup-status: setup wizard status.
+    /metrics: bearer-authenticated admin metrics from persisted run states.
+    Run lost: inspect side effects, then submit a new reviewed run.
+    Logs: bounded per execution attempt/claim; configured secret values are redacted.
+    Artifacts: 50 MiB per file, <=50 declared paths; contents are not secret-scanned.
+    Plan retention and capacity monitoring for database logs, workspaces, and artifacts.
+    Take coordinated backups and prove restore in a disposable environment.

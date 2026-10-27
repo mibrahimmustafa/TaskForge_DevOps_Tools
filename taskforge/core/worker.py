@@ -383,7 +383,7 @@ class Worker:
                 await asyncio.to_thread(destination.write_bytes, raw)
                 # Track consumer fingerprint (F11)
                 await self.db.record_fingerprint(
-                    artifact.get("md5") or hashlib.md5(raw).hexdigest(),
+                    artifact.get("md5") or hashlib.md5(raw, usedforsecurity=False).hexdigest(),
                     artifact["name"],
                     run["project"],
                     job.id,
@@ -517,7 +517,7 @@ class Worker:
                     raise ValueError("Artifact exceeds the 50 MiB limit")
                 raw = await asyncio.to_thread(path.read_bytes)
                 sha_digest = hashlib.sha256(raw).hexdigest()
-                md5_digest = hashlib.md5(raw).hexdigest()
+                md5_digest = hashlib.md5(raw, usedforsecurity=False).hexdigest()
                 rel_path = path.relative_to(workspace).as_posix()
                 # Store in build-specific artifact directory (F10)
                 dest = (

@@ -176,7 +176,7 @@
   },
   "deployment": {
     "api_image": "docker/Dockerfile non-root image with dashboard package data",
-    "compose": "docker/docker-compose.yml API + worker + PostgreSQL + shared artifact volume",
+    "compose": "docker/docker-compose.yml API + worker + PostgreSQL + shared artifact volume with .env and POSTGRES_PASSWORD fallback configuration",
     "worker_prerequisites": [
       "Tools for selected executors: git, Docker, kubectl as needed",
       "Matching target configuration",

@@ -33,7 +33,7 @@ def hash_offset(seed: str, field_idx: int, modulus: int) -> int:
     if modulus <= 1:
         return 0
     key = f"{seed}:{field_idx}".encode()
-    digest = hashlib.md5(key).hexdigest()  # nosec B324 - stable pseudo-random hashing
+    digest = hashlib.md5(key, usedforsecurity=False).hexdigest()  # nosec B324 - stable pseudo-random hashing
     return int(digest, 16) % modulus
 
 

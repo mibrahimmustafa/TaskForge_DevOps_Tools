@@ -7,7 +7,7 @@ services:
     ports: ["127.0.0.1:8080:8080"]
     env_file: ../.taskforge/config.env
     environment:
-      TASKFORGE_STORAGE_URL: postgresql+asyncpg://taskforge:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/taskforge
+      TASKFORGE_STORAGE_URL: postgresql+asyncpg://taskforge:${POSTGRES_PASSWORD:-taskforge_postgres_secret}@postgres:5432/taskforge
       TASKFORGE_DATA_DIR: /data
     volumes: ["artifacts:/data"]
     depends_on:
@@ -23,7 +23,7 @@ services:
     command: ["taskforge", "worker", "start"]
     env_file: ../.taskforge/config.env
     environment:
-      TASKFORGE_STORAGE_URL: postgresql+asyncpg://taskforge:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/taskforge
+      TASKFORGE_STORAGE_URL: postgresql+asyncpg://taskforge:${POSTGRES_PASSWORD:-taskforge_postgres_secret}@postgres:5432/taskforge
       TASKFORGE_DATA_DIR: /data
     volumes: ["artifacts:/data"]
     depends_on:
@@ -39,7 +39,7 @@ services:
     environment:
       POSTGRES_USER: taskforge
       POSTGRES_DB: taskforge
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskforge_postgres_secret}
     volumes: ["postgres:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U taskforge"]

@@ -79,6 +79,30 @@ On Linux/macOS, use `.venv/bin/python` and `.venv/bin/taskforge` instead. The AP
 
 For a local Python/shell demonstration, add `TASKFORGE_ALLOW_HOST_EXECUTION=true` to the worker's environment and restart that worker. Enable this only for trusted job authors. Docker jobs require a working Docker CLI/engine; HTTP jobs require an allowed hostname.
 
+### Docker Compose Stack (API, Worker, PostgreSQL)
+
+To run the complete TaskForge stack with an API server, background execution worker, and PostgreSQL database via Docker:
+
+From the repository root:
+```powershell
+docker compose -f docker/docker-compose.yml up --build -d
+docker compose -f docker/docker-compose.yml ps
+```
+
+Or from the `docker/` directory:
+```powershell
+cd docker
+docker compose up --build -d
+docker compose ps
+```
+
+The stack exposes:
+- **API & Web Dashboard**: `http://127.0.0.1:8080/dashboard/`
+- **Readiness Probe**: `http://127.0.0.1:8080/ready`
+- **PostgreSQL Database**: Port 5432 with automatic schema initialization
+
+`POSTGRES_PASSWORD` is configured in `docker/.env` (and root `.env`) with an automated fallback in [docker-compose.yml](docker/docker-compose.yml). Custom credentials can be specified in `.env` or via shell environment variables.
+
 See [install-steps.txt](install-steps.txt) for installation, Compose, migration, testing, and recovery steps.
 
 ## Configuration
@@ -101,6 +125,7 @@ Values come from process environment, then `.taskforge/config.env`, then `.env`,
 | `TASKFORGE_NOTIFICATION_URL` | Optional HTTP endpoint receiving completed-run messages |
 | `TASKFORGE_PLUGINS` | Installed entry-point plugin names explicitly permitted on a worker |
 | `TASKFORGE_EMBEDDED_WORKER` | Development/testing only; default false |
+| `POSTGRES_PASSWORD` | PostgreSQL superuser password used by Docker Compose; defaults to secure fallback |
 
 Viewer tokens can inspect their projects. Operators can run, cancel, pause/resume, and request deployment. Administrators can change definitions, approve deployment, and reconcile environments. Project `"*"` grants all-project access. Definition IDs are globally unique within each definition kind.
 
