@@ -753,7 +753,7 @@ class Database:
 
     async def get_completed_job_runs(
         self, project: str, job_id: str, limit: int = 1000
-    ) -> list[dict]:
+    ) -> builtins.list[dict]:
         resource = f"job:{project}:{job_id}"
         query = (
             select(work)
