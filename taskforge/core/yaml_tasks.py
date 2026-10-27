@@ -35,6 +35,14 @@ def detect_task_kind(data: dict[str, Any]) -> str:
     if explicit_kind in {"job", "pipeline"}:
         return explicit_kind
     if "steps" in data and isinstance(data["steps"], list):
+        if len(data["steps"]) > 0:
+            first = data["steps"][0]
+            if (
+                isinstance(first, dict)
+                and ("executor" in first or "command" in first)
+                and ("needs" not in first and "job" not in first)
+            ):
+                return "job"
         return "pipeline"
     return "job"
 

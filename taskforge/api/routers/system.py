@@ -1,8 +1,12 @@
+import hashlib
+import secrets
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, generate_latest
+from pydantic import BaseModel, Field
 
 from taskforge.api.auth import Principal, authenticate
 
@@ -82,7 +86,143 @@ async def system_env(request: Request, principal: Principal = Depends(authentica
 @router.get("/api/audit")
 async def audit(request: Request, principal: Principal = Depends(authenticate)):
     if principal.role != "admin":
-        from fastapi import HTTPException
-
         raise HTTPException(403, "Administrator role required")
     return await request.app.state.db.audit_events(principal.scope)
+
+
+class UnlockRequest(BaseModel):
+    key: str
+
+
+class SetupCompleteRequest(BaseModel):
+    setup_token: str
+    username: str = Field(min_length=2, max_length=50)
+    password: str = Field(min_length=6, max_length=128)
+    instance_url: str = Field(default="")
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.get("/api/system/setup-status")
+async def setup_status(request: Request):
+    db = request.app.state.db
+    is_complete = await db.is_setup_complete()
+    if not is_complete:
+        users = await db.list("user")
+        if users:
+            is_complete = True
+            await db.complete_setup()
+
+    password_file = Path(request.app.state.settings.data_dir).resolve() / "initial_admin_password"
+    if not is_complete and not password_file.exists():
+        password_file.parent.mkdir(parents=True, exist_ok=True)
+        key = secrets.token_hex(16)
+        password_file.write_text(key, encoding="utf-8")
+
+    return {
+        "setup_complete": is_complete,
+        "requires_unlock": not is_complete,
+    }
+
+
+@router.post("/api/system/setup/unlock")
+async def setup_unlock(body: UnlockRequest, request: Request):
+    password_file = Path(request.app.state.settings.data_dir).resolve() / "initial_admin_password"
+    if not password_file.exists():
+        if await request.app.state.db.is_setup_complete():
+            raise HTTPException(400, "Setup is already complete")
+        raise HTTPException(404, "Initial admin password file not found")
+
+    expected = password_file.read_text(encoding="utf-8").strip()
+    if not secrets.compare_digest(body.key.strip(), expected):
+        raise HTTPException(401, "Invalid initial admin unlock password")
+
+    setup_token = "setup-" + hashlib.sha256(expected.encode()).hexdigest()
+    return {"unlocked": True, "setup_token": setup_token}
+
+
+@router.post("/api/system/setup/complete")
+async def setup_complete(body: SetupCompleteRequest, request: Request):
+    password_file = Path(request.app.state.settings.data_dir).resolve() / "initial_admin_password"
+    if password_file.exists():
+        expected = password_file.read_text(encoding="utf-8").strip()
+        expected_token = "setup-" + hashlib.sha256(expected.encode()).hexdigest()
+        if not secrets.compare_digest(body.setup_token, expected_token):
+            raise HTTPException(401, "Invalid setup token")
+
+    db = request.app.state.db
+    token = secrets.token_urlsafe(48)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    pwd_hash = hashlib.sha256(body.password.encode()).hexdigest()
+    preview = f"{token[:6]}...{token[-4:]}"
+    now = time.time()
+
+    user_data = {
+        "id": body.username,
+        "name": body.username,
+        "role": "admin",
+        "projects": ["*"],
+        "password_hash": pwd_hash,
+        "token_hash": token_hash,
+        "token_preview": preview,
+        "created": now,
+        "created_by": "setup_wizard",
+    }
+    await db.put("user", user_data)
+    await db.put(
+        "user_token",
+        {
+            "id": token_hash,
+            "name": body.username,
+            "role": "admin",
+            "projects": ["*"],
+        },
+    )
+    await db.complete_setup(body.instance_url)
+    if password_file.exists():
+        password_file.unlink(missing_ok=True)
+    await db.record_audit("*", "setup_wizard", "system.setup_completed", body.username)
+    return {
+        "success": True,
+        "token": token,
+        "name": body.username,
+        "role": "admin",
+        "projects": ["*"],
+    }
+
+
+@router.post("/api/auth/login")
+async def login(body: LoginRequest, request: Request):
+    db = request.app.state.db
+    user = await db.get("user", body.username)
+    if not user:
+        raise HTTPException(401, "Invalid username or password")
+
+    expected_hash = user.get("password_hash")
+    if not expected_hash:
+        raise HTTPException(401, "User has no local password configured. Use API token instead.")
+
+    provided_hash = hashlib.sha256(body.password.encode()).hexdigest()
+    if not secrets.compare_digest(provided_hash, expected_hash):
+        raise HTTPException(401, "Invalid username or password")
+
+    session_token = secrets.token_urlsafe(48)
+    session_hash = hashlib.sha256(session_token.encode()).hexdigest()
+    await db.put(
+        "user_token",
+        {
+            "id": session_hash,
+            "name": user["name"],
+            "role": user["role"],
+            "projects": user.get("projects", ["*"]),
+        },
+    )
+    return {
+        "token": session_token,
+        "name": user["name"],
+        "role": user["role"],
+        "projects": user.get("projects", ["*"]),
+    }

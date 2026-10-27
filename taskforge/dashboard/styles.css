@@ -1501,3 +1501,95 @@ input[readonly] {
     scroll-behavior: auto !important;
   }
 }
+
+.badge.disabled {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.badge.unstable {
+  background: var(--amber-bg);
+  color: var(--amber);
+  border: 1px solid var(--amber-border);
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.auth-tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.auth-tab-btn.active {
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.workspace-tree {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+  max-height: 380px;
+  overflow-y: auto;
+  margin-top: 12px;
+}
+
+.workspace-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.workspace-item:last-child {
+  border-bottom: none;
+}
+
+.workspace-item:hover {
+  background: var(--panel-hover);
+}
+
+.workspace-item a, .workspace-item button.inline-link {
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.param-field {
+  margin-bottom: 14px;
+}
+
+.param-field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: 0.88rem;
+}
+
+.param-field small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}

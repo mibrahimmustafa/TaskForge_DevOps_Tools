@@ -83,7 +83,16 @@ audit = Table(
     Column("created", Float, nullable=False),
 )
 schema = Table("tf_schema", metadata, Column("version", Integer, primary_key=True))
-TERMINAL = {"success", "failed", "cancelled", "timed_out", "lost"}
+TERMINAL = {
+    "success",
+    "failed",
+    "cancelled",
+    "timed_out",
+    "lost",
+    "unstable",
+    "aborted",
+    "not_built",
+}
 
 
 class ConflictError(ValueError):
@@ -208,6 +217,7 @@ class Database:
         payload: dict,
         dedupe: str | None = None,
         status: str = "queued",
+        available: float | None = None,
     ):
         now = time.time()
         value = dict(
@@ -218,7 +228,7 @@ class Database:
             result={},
             status=status,
             created=now,
-            available=now,
+            available=available if available is not None else now,
             dedupe=dedupe,
             lease=0,
             cancel=False,
@@ -517,3 +527,242 @@ class Database:
                     )
                 ).all()
             ]
+
+    async def allocate_build_number(self, project: str, job_id: str) -> int:
+        doc_id = f"{project}:{job_id}"
+        async with self.engine.begin() as connection:
+            row = (
+                await connection.execute(
+                    select(documents.c.version, documents.c.data).where(
+                        documents.c.kind == "build_counter",
+                        documents.c.id == doc_id,
+                    )
+                )
+            ).first()
+            if row:
+                curr = int(row.data.get("current", 0)) + 1
+                await connection.execute(
+                    update(documents)
+                    .where(
+                        documents.c.kind == "build_counter",
+                        documents.c.id == doc_id,
+                    )
+                    .values(version=row.version + 1, data={"current": curr})
+                )
+                return curr
+            else:
+                await connection.execute(
+                    insert(documents).values(
+                        kind="build_counter",
+                        id=doc_id,
+                        project=project,
+                        version=1,
+                        data={"current": 1},
+                    )
+                )
+                return 1
+
+    async def get_job_permalink_run(self, project: str, job_id: str, permalink: str) -> dict | None:
+        resource = f"job:{project}:{job_id}"
+        query = select(work).where(work.c.resource == resource).order_by(work.c.created.desc())
+        p_lower = permalink.lower()
+        if p_lower in {"lastsuccessful", "last_successful", "laststable", "last_stable"}:
+            query = query.where(work.c.status == "success")
+        elif p_lower in {"lastfailed", "last_failed"}:
+            query = query.where(work.c.status == "failed")
+        elif p_lower in {"lastunstable", "last_unstable"}:
+            query = query.where(work.c.status == "unstable")
+        async with self.engine.connect() as connection:
+            row = (await connection.execute(query.limit(1))).mappings().first()
+            return dict(row) if row else None
+
+    async def is_setup_complete(self) -> bool:
+        async with self.engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    select(documents.c.data).where(
+                        documents.c.kind == "system_state",
+                        documents.c.id == "setup",
+                    )
+                )
+            ).first()
+            if row and isinstance(row.data, dict):
+                return bool(row.data.get("setup_complete", False))
+            return False
+
+    async def complete_setup(self, instance_url: str = "") -> None:
+        now = time.time()
+        async with self.engine.begin() as connection:
+            row = (
+                await connection.execute(
+                    select(documents.c.version).where(
+                        documents.c.kind == "system_state",
+                        documents.c.id == "setup",
+                    )
+                )
+            ).first()
+            data = {"setup_complete": True, "instance_url": instance_url, "completed_at": now}
+            if row:
+                await connection.execute(
+                    update(documents)
+                    .where(
+                        documents.c.kind == "system_state",
+                        documents.c.id == "setup",
+                    )
+                    .values(version=row.version + 1, data=data)
+                )
+            else:
+                await connection.execute(
+                    insert(documents).values(
+                        kind="system_state",
+                        id="setup",
+                        project="*",
+                        version=1,
+                        data=data,
+                    )
+                )
+
+    async def get_setup_state(self) -> dict:
+        async with self.engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    select(documents.c.data).where(
+                        documents.c.kind == "system_state",
+                        documents.c.id == "setup",
+                    )
+                )
+            ).first()
+            if row and isinstance(row.data, dict):
+                return dict(row.data)
+            return {"setup_complete": False, "instance_url": ""}
+
+    async def record_fingerprint(
+        self,
+        hash_md5: str,
+        file_name: str,
+        project: str,
+        job_id: str,
+        build_number: int | None,
+        run_id: str,
+        role: str = "producer",
+    ) -> dict:
+        now = time.time()
+        async with self.engine.begin() as connection:
+            row = (
+                (
+                    await connection.execute(
+                        select(documents).where(
+                            documents.c.kind == "fingerprint",
+                            documents.c.id == hash_md5,
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row:
+                data = dict(row["data"])
+                version = row["version"]
+                if role == "producer" and not data.get("producer"):
+                    data["producer"] = {
+                        "project": project,
+                        "job_id": job_id,
+                        "build_number": build_number,
+                        "run_id": run_id,
+                        "created_at": now,
+                    }
+                elif role == "consumer":
+                    usages = list(data.get("usages", []))
+                    usages.append(
+                        {
+                            "project": project,
+                            "job_id": job_id,
+                            "build_number": build_number,
+                            "run_id": run_id,
+                            "used_at": now,
+                        }
+                    )
+                    data["usages"] = usages
+                await connection.execute(
+                    update(documents)
+                    .where(
+                        documents.c.kind == "fingerprint",
+                        documents.c.id == hash_md5,
+                    )
+                    .values(version=version + 1, data=data)
+                )
+                return data
+            else:
+                data = {
+                    "hash": hash_md5,
+                    "file_name": file_name,
+                    "created_at": now,
+                    "producer": {
+                        "project": project,
+                        "job_id": job_id,
+                        "build_number": build_number,
+                        "run_id": run_id,
+                        "created_at": now,
+                    }
+                    if role == "producer"
+                    else None,
+                    "usages": [
+                        {
+                            "project": project,
+                            "job_id": job_id,
+                            "build_number": build_number,
+                            "run_id": run_id,
+                            "used_at": now,
+                        }
+                    ]
+                    if role == "consumer"
+                    else [],
+                }
+                await connection.execute(
+                    insert(documents).values(
+                        kind="fingerprint",
+                        id=hash_md5,
+                        project=project,
+                        version=1,
+                        data=data,
+                    )
+                )
+                return data
+
+    async def get_fingerprint(self, hash_md5: str) -> dict | None:
+        async with self.engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    select(documents.c.data).where(
+                        documents.c.kind == "fingerprint",
+                        documents.c.id == hash_md5,
+                    )
+                )
+            ).first()
+            if row and isinstance(row.data, dict):
+                return dict(row.data)
+            return None
+
+    async def delete_run(self, identifier: str) -> bool:
+        async with self.engine.begin() as connection:
+            # Delete logs
+            await connection.execute(delete(logs).where(logs.c.run_id == identifier))
+            # Delete work item
+            result = await connection.execute(delete(work).where(work.c.id == identifier))
+            return result.rowcount > 0
+
+    async def get_completed_job_runs(
+        self, project: str, job_id: str, limit: int = 1000
+    ) -> list[dict]:
+        resource = f"job:{project}:{job_id}"
+        query = (
+            select(work)
+            .where(
+                work.c.resource == resource,
+                work.c.status.in_(TERMINAL),
+            )
+            .order_by(work.c.created.desc())
+            .limit(limit)
+        )
+        async with self.engine.connect() as connection:
+            return [dict(row) for row in (await connection.execute(query)).mappings()]

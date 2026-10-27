@@ -67,7 +67,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["BLE001", "S102", "S110", "ASYNC230", "E501", "UP042", "SIM105"]
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header", "typer.Option", "typer.Argument"]
 
 [tool.mypy]
 python_version = "3.11"

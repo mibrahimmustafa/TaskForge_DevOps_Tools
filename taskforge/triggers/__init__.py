@@ -9,10 +9,12 @@ from taskforge.triggers.oneshot import OneShotTrigger
 from taskforge.triggers.webhook import WebhookTrigger
 
 
-def get_trigger(trigger_type: TriggerType, expr: str, timezone: str = "UTC") -> BaseTrigger:
+def get_trigger(
+    trigger_type: TriggerType, expr: str, timezone: str = "UTC", seed: str = ""
+) -> BaseTrigger:
     ZoneInfo(timezone)
     if trigger_type == TriggerType.CRON:
-        return CronTrigger(expr, timezone)
+        return CronTrigger(expr, timezone, seed=seed)
     if trigger_type == TriggerType.INTERVAL:
         return IntervalTrigger(expr)
     if trigger_type in (TriggerType.WEBHOOK, TriggerType.MANUAL):

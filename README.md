@@ -1,11 +1,26 @@
 # TaskForge
 
-TaskForge 0.3 is a self-hosted CI/CD and task automation system with a FastAPI control plane, independent execution workers, PostgreSQL or SQLite persistence, and a browser dashboard.
+TaskForge 0.4 is a self-hosted CI/CD and task automation system with a FastAPI control plane, independent execution workers, PostgreSQL or SQLite persistence, browser dashboard, and Jenkins Core feature parity.
 
-It supports **artifact-only pipelines, Docker deployment, and Kubernetes deployment**. Deployments promote a digest recorded by a successful build, can require a different administrator's approval, verify service health, and attempt to restore the previous release on failure.
+It supports **Freestyle multi-step builds, artifact-only DAG pipelines, Docker deployment, and Kubernetes deployment**. Deployments promote a digest recorded by a successful build, can require a different administrator's approval, verify service health, and attempt to restore the previous release on failure.
 
 ## What is implemented
 
+- **Jenkins Core Freestyle Multi-Step Builds**: Sequential step execution with independent executors (Shell, Python, Docker, HTTP) running inside a dedicated workspace (`workspaces/{job_id}/`).
+- **Sequential Build Numbers**: Monotonically increasing atomic build numbers (#1, #2, #3...) tracked per job.
+- **Parameterized Builds**: First-class build parameter definitions (`choice`, `string`, `boolean`, `text`, `password`), validated at queue time and injected into process environment variables.
+- **Job Controls & Concurrency**: Enable/disable job toggle, quiet period queue delay (`quiet_period_seconds`), and serialized job concurrency mutex (`concurrent_builds: false`).
+- **Interactive Workspace Management**: Built-in workspace tree explorer (`GET /api/jobs/{id}/workspace`), file content viewer, and 1-click workspace wipe.
+- **Permalinks**: Permanent direct endpoints to `last`, `lastSuccessful`, `lastFailed`, and `lastStable` runs and archived build artifacts.
+- **Deterministic Jenkins H-Cron**: Hash-based cron scheduling (`H/15 * * * *`, `H(0-29)/10 * * * *`, `H H(0-7) * * *`) seeded deterministically by job ID to spread scheduling load across time.
+- **Upstream / Downstream Build Triggers**: Chain jobs automatically upon build completion based on threshold conditions (`SUCCESS`, `UNSTABLE`, `ALWAYS`) with full upstream cause lineage.
+- **Ant/Glob Artifact Archiving**: Output artifact archiving with include and exclude patterns (`artifact_paths`, `artifact_exclude_paths`) preserving relative directory structures, byte sizes, and digests.
+- **Artifact Fingerprints & Lineage**: SHA-256 and MD5 fingerprint registry tracking artifact provenance and usage across jobs and runs.
+- **Discard Old Builds (LogRotator)**: Automated build retention enforcing maximum builds and retention age in days, while strictly preserving runs flagged `keep_forever` and milestone permalinks.
+- **Setup Wizard & Password Unlock**: First-run setup wizard unlocked via `initialAdminPassword` secret with admin user creation and standard tool installation.
+- **Global Tool Management**: Define named tools (NodeJS, Go, Maven, Python) with automatic worker process `PATH` prepending.
+- **Remote API Tree Filtering**: Jenkins-compatible `?tree=...` query selector syntax across jobs and runs endpoints for lightweight querying.
+- **Comprehensive CLI**: `taskforge build` (with `--param`, `--wait`, `--follow`), `taskforge console` (with `--follow`), and `taskforge artifacts`.
 - Manual, cron, interval, one-shot, signed GitHub push, and secret-protected webhook triggers.
 - Declarative YAML/JSON task definitions for standalone jobs and multi-step DAG pipelines, multi-document streaming (`---`), live syntax dry-run validation, sensitive secret redaction on export, and `taskforge apply` CLI support.
 - Dashboard declarative task creation dialog with quick-start templates (Python cron, Docker task, Shell script, CI/CD pipeline), live validation badges, and 1-click clipboard copy / file download.
@@ -17,7 +32,7 @@ It supports **artifact-only pipelines, Docker deployment, and Kubernetes deploym
 - Content-addressed local artifacts with SHA-256 and a 50 MiB limit per file, with authenticated in-modal text preview for logs and manifests.
 - Docker and Kubernetes adapters with immutable image validation, environment serialization, approvals, stale-build prevention, explicit rollback, and recovery reconciliation.
 - Transactional notification queue with up to five HTTP delivery attempts and an idempotency key.
-- Responsive dark/light dashboard: visual DAG workflow graphs, overview pulse, jobs, pipelines, run history with live streaming terminal and copy controls, deployments, integrations, users & access management, and audit trail. Displays real persisted data and clear errors.
+- Responsive dark/light dashboard: visual DAG workflow graphs, overview pulse, jobs, pipelines, run history with live streaming terminal and copy controls, deployments, integrations, users & access management, setup wizard, and audit trail.
 - GitHub Actions quality checks, Windows/Linux test matrix, PostgreSQL integration, Chromium UI tests, container smoke testing, and gated tag releases to GHCR.
 
 This release is intended for trusted teams. It is not a hostile-code multi-tenant sandbox. Shell/Python can access their runner's host; Docker access also grants substantial control of the host. Keep execution workers separate from the API and isolate runners by trust boundary.
@@ -271,22 +286,37 @@ Interactive API schemas are at `/docs`. Supply `Authorization: Bearer <token>` f
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /health`, `GET /ready` | API liveness and database readiness; readiness does not imply a worker is online |
+| `GET /api/system/setup-status`, `.../unlock`, `.../complete` | Setup wizard state and first-run administrator unlock |
+| `POST /api/auth/login` | Session login using administrator password |
 | `GET /api/session`, `GET /api/system/stats` | Identity, scoped run counts, online worker count |
-| `GET/POST /api/jobs` | List/save jobs; updates require the current `version` |
+| `GET/POST /api/jobs` | List/save jobs (supports `?tree=` filtering); updates require current `version` |
 | `POST /api/jobs/yaml`, `GET /api/jobs/{id}/yaml` | Save and export job definitions in clean YAML format |
-| `POST /api/jobs/{id}/run` | Queue immutable snapshot; optional `Idempotency-Key` |
+| `POST /api/jobs/{id}/copy`, `.../rename` | Clone or rename an existing job definition |
+| `GET /api/jobs/{id}/workspace` | Interactive workspace file and directory tree explorer |
+| `GET /api/jobs/{id}/workspace/file` | Read workspace file content |
+| `POST /api/jobs/{id}/workspace/wipe` | Wipe job workspace clean |
+| `GET /api/jobs/{id}/permalinks/{name}` | Permanent direct link to `last`, `lastSuccessful`, `lastFailed`, or `lastStable` run |
+| `GET /api/jobs/{id}/permalinks/{name}/artifacts/{path}` | Direct permanent link to artifact by path from a permalink run |
+| `POST /api/jobs/{id}/run` | Queue snapshot with parameters (`{"parameters": {"KEY": "VAL"}}`); optional `Idempotency-Key` |
+| `POST /api/jobs/{id}/retention/run` | Manually run LogRotator build retention pruning for a job |
 | `POST /api/jobs/{id}/pause`, `.../resume` | Change persisted schedule |
 | `DELETE /api/jobs/{id}?version=N` | Delete definition, preserving history |
 | `GET/POST /api/pipelines`, `POST /api/pipelines/{id}/run` | Manage and run DAG pipelines |
 | `POST /api/pipelines/yaml`, `GET /api/pipelines/{id}/yaml` | Save and export pipeline DAG definitions in clean YAML format |
 | `POST /api/tasks/apply` | Declaratively apply single or multi-document (`---`) YAML/JSON tasks (jobs and pipelines) |
 | `POST /api/tasks/validate` | Dry-run syntax and schema validation for YAML task definitions without saving |
-| `GET /api/runs?limit=50&offset=0` | Paginated execution history |
-| `GET /api/runs/{id}/logs?after=0` | Cursor-based logs |
+| `GET /api/runs?limit=50&offset=0` | Paginated execution history (supports `?tree=` filtering) |
+| `GET /api/runs/{id}` | Inspect execution snapshot (supports `?tree=` filtering) |
+| `GET /api/runs/{id}/logs?after=0` | Cursor-based live log streaming |
+| `GET /api/runs/{id}/logs/download` | Download full execution console log as text file |
 | `GET /api/runs/{id}/attempts` | Persisted attempt records |
-| `GET /api/runs/{id}/artifacts/{sha256}` | Authorized artifact download |
+| `GET /api/runs/{id}/artifacts` | List archived artifacts for a run with paths, sizes, and digests |
+| `GET /api/runs/{id}/artifacts/{path}` | Authorized artifact download by relative archive path or SHA-256 |
 | `GET /api/runs/{id}/artifacts/{sha256}/preview` | Authenticated text preview (up to 256 KB) |
+| `POST /api/runs/{id}/keep` | Toggle `keep_forever` flag to protect build milestone from retention pruning |
 | `POST /api/runs/{id}/cancel` | Queued/running cancellation |
+| `GET /api/fingerprints/{hash}`, `POST /api/fingerprints/track` | Track artifact lineage and cross-job usage via MD5/SHA-256 |
+| `GET/POST/DELETE /api/tools` | Configure global tool installations with PATH injection |
 | `POST /api/deployments`, `.../{id}/approve`, `.../{id}/reconcile` | Deployment lifecycle |
 | `GET/POST /api/users` | List users and provision new user with role (`admin`, `operator`, `viewer`) and project scopes |
 | `PATCH /api/users/{name}` | Update role or project scopes for a managed user |
@@ -294,7 +324,25 @@ Interactive API schemas are at `/docs`. Supply `Authorization: Bearer <token>` f
 | `DELETE /api/users/{name}` | Revoke and delete a managed user account |
 | `GET /api/audit`, `GET /metrics` | Administrator audit records and persisted-state Prometheus metrics |
 
-Cron accepts five or six fields and an IANA timezone. Intervals use positive expressions such as `every 5m`. One-shot timestamps require an offset, e.g. `2026-12-01T10:00:00+03:00`. Missed recurring ticks coalesce to one execution. Pausing a definition does not cancel already queued/running work.
+### CLI Build & Console Commands
+
+```powershell
+$env:TASKFORGE_API_TOKEN = "your-token"
+
+# Trigger a build with parameters and stream the console output
+taskforge build job-hello-world --param TARGET_ENV=production --follow
+
+# Trigger a build and wait for it to complete (exits with non-zero on failure)
+taskforge build job-hello-world --wait
+
+# Stream console log for an existing or running execution
+taskforge console <run_id> --follow
+
+# List archived artifacts for a run
+taskforge artifacts <run_id>
+```
+
+Cron accepts five or six fields, standard intervals, and Jenkins H-notation (`H/15 * * * *`, `H(0-29)/10 * * * *`, `H H(0-7) * * *`). Missed recurring ticks coalesce to one execution. Pausing a definition does not cancel already queued/running work.
 
 ## Validation and releases
 

@@ -1,8 +1,10 @@
 """Lease-fenced runner with bounded logs, explicit retries, pipeline DAGs and recovery."""
 
 import asyncio
+import fnmatch
 import hashlib
 import json
+import os
 import random
 import shutil
 import time
@@ -21,6 +23,39 @@ from taskforge.executors.process import run_process
 from taskforge.jobs.models import Job, Pipeline
 from taskforge.plugins.loader import PluginLoader
 from taskforge.storage.database import Database
+
+
+def collect_matching_files(
+    workspace: Path, include_patterns: list[str], exclude_patterns: list[str]
+) -> list[Path]:
+    """Find all files in workspace matching include_patterns and not excluded by exclude_patterns."""
+    matched: set[Path] = set()
+    ws_resolved = workspace.resolve()
+    for pattern in include_patterns:
+        pattern_norm = pattern.replace("\\", "/").strip()
+        if not pattern_norm:
+            continue
+        if any(c in pattern_norm for c in ["*", "?", "["]):
+            for p in workspace.glob(pattern_norm):
+                if p.is_file() and p.resolve().is_relative_to(ws_resolved):
+                    matched.add(p)
+        else:
+            p = (workspace / pattern_norm).resolve()
+            if p.is_file() and p.is_relative_to(ws_resolved):
+                matched.add(p)
+
+    final_files: list[Path] = []
+    for file_path in sorted(matched, key=lambda x: str(x)):
+        rel = file_path.relative_to(workspace).as_posix()
+        excluded = False
+        for ex in exclude_patterns:
+            ex_norm = ex.replace("\\", "/").strip()
+            if fnmatch.fnmatch(rel, ex_norm) or fnmatch.fnmatch(file_path.name, ex_norm):
+                excluded = True
+                break
+        if not excluded:
+            final_files.append(file_path)
+    return final_files
 
 
 class RetryScheduled(Exception):
@@ -113,7 +148,13 @@ class Worker:
         # External deployment APIs cannot honor our DB fence. An interrupted
         # deployment therefore holds its environment until explicit reconciliation.
         lock_ttl = 315360000 if deployment else lease
-        if not await self.db.lock(run["resource"], owner, lock_ttl):
+        lock_resource = run["resource"]
+        if run["payload"]["kind"] == "job":
+            job_def = run["payload"].get("definition", {})
+            concurrent = job_def.get("concurrent_builds", True)
+            lock_resource = f"run-exec:{identifier}" if concurrent else run["resource"]
+
+        if not await self.db.lock(lock_resource, owner, lock_ttl):
             await self.db.owned(
                 identifier, owner, status="queued", owner=None, available=time.time() + 1, lease=0
             )
@@ -137,7 +178,7 @@ class Worker:
                     not fresh
                     or fresh["cancel"]
                     or not await self.db.owned(identifier, owner, lease=time.time() + lease)
-                    or not await self.db.lock(run["resource"], owner, lock_ttl)
+                    or not await self.db.lock(lock_resource, owner, lock_ttl)
                 ):
                     if current is not None:
                         current.cancel()
@@ -243,11 +284,61 @@ class Worker:
                     and run["payload"]["kind"] != "notification",
                 )
             if not deployment or status == "success":
-                await self.db.unlock(run["resource"], owner)
+                await self.db.unlock(lock_resource, owner)
             if committed:
                 await self.db.record_audit(
                     run["project"], f"worker:{self.id}", f"run.{status}", identifier
                 )
+                if run["payload"]["kind"] == "job":
+                    job_def = run["payload"].get("definition", {})
+                    # 1. Downstream Triggers (F04)
+                    triggers = job_def.get("downstream_triggers", [])
+                    for dt in triggers:
+                        target_id = dt.get("job_id")
+                        thresh = dt.get("threshold", "success")
+                        met = False
+                        if (
+                            thresh == "success"
+                            and status == "success"
+                            or thresh == "unstable"
+                            and status in {"success", "unstable"}
+                            or thresh == "failed"
+                            and status in {"success", "unstable", "failed"}
+                        ):
+                            met = True
+                        if met and target_id:
+                            try:
+                                target_doc = await self.db.get("job", target_id)
+                                if target_doc:
+                                    target_job = Job.model_validate(target_doc)
+                                    if target_job.enabled:
+                                        build_num = run["payload"].get(
+                                            "build_number"
+                                        ) or result.get("build_number")
+                                        cause = {
+                                            "type": "upstream",
+                                            "upstream_project": run["project"],
+                                            "upstream_job": job_def.get("id"),
+                                            "upstream_build": build_num,
+                                            "upstream_run_id": identifier,
+                                        }
+                                        await self.scheduler.submit(
+                                            target_job,
+                                            trigger_type="upstream",
+                                            parameters=dt.get("parameters", {}),
+                                            cause=cause,
+                                        )
+                            except Exception as trigger_err:
+                                logger.error("downstream_trigger_failed", error=str(trigger_err))
+                    # 2. Build Retention (F12)
+                    try:
+                        from taskforge.jobs.retention import apply_build_retention
+
+                        await apply_build_retention(
+                            self.db, self.settings, run["project"], job_def.get("id")
+                        )
+                    except Exception as ret_err:
+                        logger.error("retention_cleanup_failed", error=str(ret_err))
 
     async def execute_job(
         self,
@@ -290,12 +381,47 @@ class Worker:
                     raise ValueError("Dependency artifact destination escapes the step workspace")
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 await asyncio.to_thread(destination.write_bytes, raw)
+                # Track consumer fingerprint (F11)
+                await self.db.record_fingerprint(
+                    artifact.get("md5") or hashlib.md5(raw).hexdigest(),
+                    artifact["name"],
+                    run["project"],
+                    job.id,
+                    run["payload"].get("build_number"),
+                    run["id"],
+                    role="consumer",
+                )
         environment = {}
         for reference in job.secret_refs:
             key = f"{job.project}/{reference}"
             if key not in self.settings.secrets:
                 raise ValueError(f"Secret reference not configured: {reference}")
             environment[reference] = self.settings.secrets[key]
+        # Global Tool PATH Injection (F19)
+        if job.tools:
+            for tool_name in job.tools:
+                tool_doc = await self.db.get("tool", tool_name)
+                if not tool_doc:
+                    all_tools = await self.db.list("tool")
+                    tool_doc = next(
+                        (
+                            t
+                            for t in all_tools
+                            if t.get("name") == tool_name or t.get("id") == tool_name
+                        ),
+                        None,
+                    )
+                if tool_doc:
+                    tool_home = tool_doc.get("home", "")
+                    tool_bin = Path(tool_home) / "bin"
+                    bin_dir = str(tool_bin) if tool_bin.exists() else tool_home
+                    current_path = environment.get("PATH", os.environ.get("PATH", ""))
+                    environment["PATH"] = f"{bin_dir}{os.pathsep}{current_path}"
+                    ttype = tool_doc.get("tool_type", "").upper()
+                    if ttype:
+                        environment[f"{ttype}_HOME"] = tool_home
+                        if ttype == "GO":
+                            environment["GOROOT"] = tool_home
         ci_env: dict[str, str] = {
             "CI": "true",
             "TASKFORGE": "true",
@@ -319,9 +445,42 @@ class Worker:
         for attempt in range(len(attempts), job.max_retries + 1):
             await stream.write(f"\n[{step}] Attempt {attempt + 1}/{job.max_retries + 1}\n")
             started = time.time()
-            code, _ = await get_executor(job.executor).execute(
-                job, cwd=workspace, env=environment, sink=stream.write
-            )
+            if job.steps:
+                code = 0
+                for idx, bstep in enumerate(job.steps):
+                    s_name = bstep.name or f"Step {idx + 1}"
+                    await stream.write(
+                        f"\n[{step}] Step {idx + 1}/{len(job.steps)}: {s_name} ({bstep.executor.value})\n"
+                    )
+                    if (
+                        bstep.executor in {"shell", "python"}
+                        and not self.settings.allow_host_execution
+                    ):
+                        raise ValueError(
+                            f"Host execution is disabled for step '{s_name}'. Enable it only on a trusted runner."
+                        )
+                    step_job = Job(
+                        id=f"{job.id}-step-{idx}",
+                        project=job.project,
+                        name=s_name,
+                        executor=bstep.executor,
+                        command=bstep.command,
+                        args=bstep.args,
+                        image=bstep.image,
+                        timeout_seconds=job.timeout_seconds,
+                    )
+                    code, _ = await get_executor(bstep.executor).execute(
+                        step_job, cwd=workspace, env=environment, sink=stream.write
+                    )
+                    if code != 0:
+                        await stream.write(
+                            f"\n[{step}] Step {idx + 1} exited with code {code}. Aborting build.\n"
+                        )
+                        break
+            else:
+                code, _ = await get_executor(job.executor).execute(
+                    job, cwd=workspace, env=environment, sink=stream.write
+                )
             attempts.append(
                 {
                     "number": attempt + 1,
@@ -348,27 +507,63 @@ class Worker:
                 raise RetryScheduled({"attempts": attempts}, delay)
             await asyncio.sleep(delay)
         artifacts = []
-        if code == 0:
-            for relative in job.artifact_paths:
-                path = (workspace / relative).resolve()
-                if not path.is_relative_to(workspace.resolve()) or not path.is_file():
-                    raise ValueError("Artifact must be a regular file inside the step workspace")
+        if code == 0 and job.artifact_paths:
+            include_patterns = job.artifact_paths
+            exclude_patterns = job.artifact_exclude_paths
+            matched_files = collect_matching_files(workspace, include_patterns, exclude_patterns)
+            build_num_str = str(run["payload"].get("build_number") or run["id"])
+            for path in matched_files:
                 if path.stat().st_size > 50 * 1024 * 1024:
                     raise ValueError("Artifact exceeds the 50 MiB limit")
                 raw = await asyncio.to_thread(path.read_bytes)
-                digest = hashlib.sha256(raw).hexdigest()
-                destination = (
+                sha_digest = hashlib.sha256(raw).hexdigest()
+                md5_digest = hashlib.md5(raw).hexdigest()
+                rel_path = path.relative_to(workspace).as_posix()
+                # Store in build-specific artifact directory (F10)
+                dest = (
+                    self.settings.data_dir.resolve()
+                    / "artifacts"
+                    / run["project"]
+                    / job.id
+                    / build_num_str
+                    / rel_path
+                )
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(dest.write_bytes, raw)
+                # Store in legacy run-id artifact storage for pipeline step inputs
+                legacy_dest = (
                     self.settings.data_dir.resolve()
                     / "artifacts"
                     / run["project"]
                     / run["id"]
-                    / digest
+                    / sha_digest
                 )
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                await asyncio.to_thread(destination.write_bytes, raw)
-                artifacts.append({"name": path.name, "sha256": digest, "size": len(raw)})
+                legacy_dest.parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(legacy_dest.write_bytes, raw)
+                # Record fingerprint producer (F11)
+                await self.db.record_fingerprint(
+                    md5_digest,
+                    path.name,
+                    run["project"],
+                    job.id,
+                    run["payload"].get("build_number"),
+                    run["id"],
+                    role="producer",
+                )
+                artifacts.append(
+                    {
+                        "path": rel_path,
+                        "name": path.name,
+                        "sha256": sha_digest,
+                        "md5": md5_digest,
+                        "size": len(raw),
+                    }
+                )
         return {
             "status": "success" if code == 0 else "timed_out" if code == -1 else "failed",
+            "build_number": run["payload"].get("build_number"),
+            "parameters": run["payload"].get("parameters", {}),
+            "cause": run["payload"].get("cause", {}),
             "attempts": attempts,
             "artifacts": artifacts,
         }

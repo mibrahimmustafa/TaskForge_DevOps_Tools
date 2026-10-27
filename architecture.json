@@ -1,9 +1,9 @@
 {
   "project": "TaskForge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "schema_version": 1,
   "repository": "https://github.com/mibrahimmustafa/TaskForge_DevOps_Tools",
-  "description": "Self-hosted CI/CD and task automation for trusted teams",
+  "description": "Self-hosted CI/CD and task automation for trusted teams with Jenkins Core feature parity",
   "components": {
     "dashboard": {
       "path": "taskforge/dashboard",
@@ -20,9 +20,10 @@
         "deployments",
         "integrations",
         "users",
-        "audit"
+        "audit",
+        "setup wizard"
       ],
-      "authentication": "Bearer token kept only in browser memory",
+      "authentication": "Bearer token kept only in browser memory or initial admin password setup unlock",
       "refresh": "5s workspace; 1.5s execution log polling",
       "accessibility": [
         "labeled forms",
@@ -35,7 +36,8 @@
         "streaming terminal controls and log copy",
         "in-modal artifact text preview",
         "declarative YAML/JSON task definition with templates and syntax validation",
-        "YAML export with 1-click clipboard copy and file download"
+        "YAML export with 1-click clipboard copy and file download",
+        "first-run setup wizard and initial admin password unlocking"
       ]
     },
     "api": {
@@ -50,7 +52,12 @@
       ],
       "authorization": "Project scopes checked on definitions, runs, logs, artifacts, and deployment requests",
       "user_management": "Admin-controlled user provisioning with role hierarchy (admin, operator, viewer), project scoping, token generation, rotation, and revocation",
+      "setup_wizard": "GET /api/system/setup-status, POST /api/system/setup/unlock, POST /api/system/setup/complete, and POST /api/auth/login",
       "declarative_yaml_endpoints": "POST /api/jobs/yaml, GET /api/jobs/{id}/yaml, POST /api/pipelines/yaml, GET /api/pipelines/{id}/yaml, POST /api/tasks/apply, and POST /api/tasks/validate",
+      "remote_api_tree_filtering": "Supports Jenkins-compatible ?tree= selector across /api/jobs and /api/runs endpoints",
+      "freestyle_endpoints": "Copy (POST /api/jobs/{id}/copy), Rename (POST /api/jobs/{id}/rename), Workspace Explorer (GET /api/jobs/{id}/workspace), Workspace File (GET /api/jobs/{id}/workspace/file), Workspace Wipe (POST /api/jobs/{id}/workspace/wipe), Permalinks (GET /api/jobs/{id}/permalinks/{name}), Permalink Artifacts (GET /api/jobs/{id}/permalinks/{name}/artifacts/{path}), and Retention Run (POST /api/jobs/{id}/retention/run)",
+      "fingerprints": "GET /api/fingerprints/{hash} and POST /api/fingerprints/track for cross-job artifact lineage",
+      "tools": "GET, POST, DELETE /api/tools for global tool installations",
       "request_body_limit_bytes": 1048576
     },
     "yaml_tasks": {
@@ -83,7 +90,10 @@
         "Atomic queue claim",
         "Unique execution fence and lease",
         "Occurrence/payload deduplication",
-        "Terminal state and notification queued in one transaction"
+        "Terminal state and notification queued in one transaction",
+        "Atomic sequential build numbering per job",
+        "Setup completion and admin credential state tracking",
+        "Artifact fingerprint registry tracking MD5 and SHA-256 digests"
       ],
       "migration": "Version 1 initialization/guard plus read-only idempotent legacy import; incremental schema migrations pending"
     },
@@ -94,14 +104,19 @@
         "Persisted schedule controller election",
         "Queue claim and resource locking",
         "Heartbeat and cancellation",
-        "DAG execution",
-        "Artifact integrity",
+        "Multi-step sequential Freestyle job execution",
+        "DAG pipeline execution",
+        "Artifact integrity and glob archiving with exclusions",
+        "MD5 and SHA-256 artifact fingerprint recording",
+        "Downstream build triggering on completion threshold",
+        "LogRotator automated build and log retention",
+        "Global tool PATH injection",
         "Deployment verification and reconciliation locks",
         "Notification delivery",
         "Explicit installed-plugin lifecycle",
         "Standard CI/CD environment variables and runtime parameter injection"
       ],
-      "concurrency": "Per-worker concurrent runs and per-pipeline parallel steps",
+      "concurrency": "Per-worker concurrent runs, per-job concurrency mutex (concurrent_builds), and per-pipeline parallel steps",
       "retry": "Standalone jobs persist availability/attempts and release slots; pipeline steps retry within live pipeline execution",
       "recovery": "Expired running leases become lost; no automatic side-effect replay"
     },
@@ -112,19 +127,24 @@
       "http": "Exact hostname allowlist, bounded response, no redirects or ambient proxies",
       "process_cleanup": "Unix process groups; Windows Job Objects"
     },
-    "sources": {
+    "triggers": {
+      "cron": "Standard 5/6 field cron and Jenkins H-notation (H/15 * * * *, H(0-29)/10 * * * *, H H(0-7) * * *) seeded deterministically by job ID",
+      "interval": "Positive interval expressions (e.g., every 5m)",
+      "one_shot": "Timestamp with offset",
       "github": "HMAC-verified push payloads, repository/branch allowlist, body deduplication, public repository exact-commit checkout",
-      "webhook": "Hashed shared secret, idempotency key, active webhook definition required"
+      "webhook": "Hashed shared secret, idempotency key, active webhook definition required",
+      "downstream": "Triggered by upstream completed jobs on SUCCESS, UNSTABLE, or ALWAYS with upstream cause lineage"
     },
     "artifacts": {
       "backend": "Shared local filesystem",
-      "layout": "<data_dir>/artifacts/<project>/<run>/<sha256>",
+      "layout": "<data_dir>/artifacts/<project>/<run>/<path>",
       "max_file_bytes": 52428800,
       "max_paths_per_job": 50,
       "handoff": "Verified copy to inputs/<dependency>/<filename>",
-      "access": "Authenticated project-scoped API",
+      "access": "Authenticated project-scoped API and permalink paths",
       "preview": "Authenticated text preview up to 256KB for logs, manifests, and reports",
-      "retention": "Manual; automation pending",
+      "fingerprints": "MD5 and SHA-256 fingerprint tracking across jobs and runs",
+      "retention": "LogRotator automatic retention (max builds and max age days) protecting keep_forever flags and permalinks",
       "secret_scanning": false
     },
     "deployments": {
@@ -150,7 +170,8 @@
       "readiness": "GET /ready checks database",
       "metrics": "GET /metrics authenticated admin; persisted status gauges and online worker count",
       "audit": "GET /api/audit scoped admin records",
-      "notifications": "HTTP endpoint; transactional outbox work, five delivery attempts, idempotency key"
+      "notifications": "HTTP endpoint; transactional outbox work, five delivery attempts, idempotency key",
+      "cli": "taskforge build, console, and artifacts commands for direct terminal observability"
     }
   },
   "deployment": {
@@ -200,8 +221,8 @@
     "production_deploy": "Requires configured real target and separate approval"
   },
   "known_limits": [
-    "Dynamic database tokens and static config tokens supported; OIDC/SSO federated identity pending",
-    "Local shared artifacts; no automatic retention",
+    "Dynamic database tokens, setup password auth, and static config tokens supported; OIDC/SSO federated identity pending",
+    "Local shared artifacts with automated LogRotator retention; external object store (S3/GCS) pending",
     "No private repository authentication or GitHub commit status reporting",
     "No event bus trigger",
     "No pipeline checkpoint resume",

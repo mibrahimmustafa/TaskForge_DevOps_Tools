@@ -1,5 +1,4 @@
-"""Submission and persisted schedule calculation; never execute workloads in the API."""
-
+import time
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfoNotFoundError
 
@@ -12,7 +11,9 @@ def validate_job(job: Job):
     if job.status not in {JobStatus.ACTIVE, JobStatus.PAUSED}:
         raise ValueError("Job status must be active or paused")
     try:
-        get_trigger(job.trigger, job.trigger_expr, job.timezone).to_apscheduler_trigger()
+        get_trigger(
+            job.trigger, job.trigger_expr, job.timezone, seed=job.id
+        ).to_apscheduler_trigger()
     except (ValueError, ZoneInfoNotFoundError) as exc:
         raise ValueError(f"Invalid schedule: {exc}") from exc
     if job.executor == "docker" and not job.image:
@@ -22,7 +23,9 @@ def validate_job(job: Job):
 
 
 def next_occurrence(job: Job, after: datetime | None = None):
-    trigger = get_trigger(job.trigger, job.trigger_expr, job.timezone).to_apscheduler_trigger()
+    trigger = get_trigger(
+        job.trigger, job.trigger_expr, job.timezone, seed=job.id
+    ).to_apscheduler_trigger()
     if trigger is None:
         return None
     now = datetime.now(UTC)
@@ -42,13 +45,33 @@ class TaskScheduler:
         saved = await self.storage.put("job", job.model_dump(mode="json"), job.version)
         return Job.model_validate(saved)
 
-    async def submit(self, job: Job, trigger_type: str = "manual", dedupe: str | None = None):
+    async def submit(
+        self,
+        job: Job,
+        trigger_type: str = "manual",
+        dedupe: str | None = None,
+        parameters: dict | None = None,
+        cause: dict | None = None,
+    ):
+        if not job.enabled:
+            raise ValueError(f"Job '{job.id}' is disabled and cannot be executed")
         snapshot = job.model_dump(mode="json", exclude={"webhook_secret"})
+        build_number = await self.storage.allocate_build_number(job.project, job.id)
+        now = time.time()
+        available = now + job.quiet_period_seconds if job.quiet_period_seconds > 0 else now
         return await self.storage.enqueue(
             job.project,
             f"job:{job.project}:{job.id}",
-            {"kind": "job", "definition": snapshot, "trigger": trigger_type},
+            {
+                "kind": "job",
+                "definition": snapshot,
+                "trigger": trigger_type,
+                "build_number": build_number,
+                "parameters": parameters or {},
+                "cause": cause or {"type": trigger_type},
+            },
             dedupe,
+            available=available,
         )
 
     async def submit_pipeline(
@@ -73,7 +96,7 @@ class TaskScheduler:
     async def tick(self):
         for value in await self.storage.list("job", limit=10000):
             job = Job.model_validate(value)
-            if job.status != JobStatus.ACTIVE or not job.next_run:
+            if not job.enabled or job.status != JobStatus.ACTIVE or not job.next_run:
                 continue
             due = datetime.fromisoformat(job.next_run)
             if due > datetime.now(UTC):

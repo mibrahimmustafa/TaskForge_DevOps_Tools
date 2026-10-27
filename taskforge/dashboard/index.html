@@ -1,7 +1,54 @@
 <!doctype html>
 <html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="TaskForge pipeline operations and controlled deployments."><title>TaskForge · Pipeline operations</title><link rel="icon" href="data:,"><link rel="stylesheet" href="styles.css"><script src="app.js" defer></script></head><body>
 <a class="skip-link" href="#main">Skip to content</a>
-<section id="login" class="login-wrap"><div class="login-brand"><span class="brand-mark">TF</span>TaskForge</div><form id="login-form" class="login-card"><span class="eyebrow">YOUR OPERATIONS WORKSPACE</span><h1>From commit<br>to confidence.</h1><p class="muted">Manage jobs, follow every run, and release with a clear record of what changed.</p><label for="access-token">Access token</label><input id="access-token" type="password" required minlength="32" autocomplete="off" placeholder="Paste your workspace access token"><p class="hint">Ask your administrator for a token. Access is limited to your assigned projects and role.</p><p id="login-error" class="error-text" role="alert"></p><button class="primary" id="connect" type="submit">Open workspace →</button><div class="login-foot">Authenticated access · No simulated results</div></form></section>
+<section id="login" class="login-wrap">
+  <div class="login-brand"><span class="brand-mark">TF</span>TaskForge</div>
+  <form id="login-form" class="login-card">
+    <span class="eyebrow" id="auth-card-eyebrow">YOUR OPERATIONS WORKSPACE</span>
+    <h1 id="auth-card-title">From commit<br>to confidence.</h1>
+    <p class="muted" id="auth-card-desc">Manage jobs, follow every run, and release with a clear record of what changed.</p>
+    
+    <div id="auth-mode-switch" class="auth-tabs">
+      <button type="button" id="tab-token" class="auth-tab-btn active">Access token</button>
+      <button type="button" id="tab-password" class="auth-tab-btn">Password</button>
+      <button type="button" id="tab-wizard" class="auth-tab-btn" hidden>Setup Wizard</button>
+    </div>
+
+    <div id="token-fields">
+      <label for="access-token">Access token</label>
+      <input id="access-token" type="password" autocomplete="off" placeholder="Paste your workspace access token">
+      <p class="hint">Ask your administrator for a token. Access is limited to your assigned projects and role.</p>
+    </div>
+
+    <div id="password-fields" hidden>
+      <label for="login-username">Account username</label>
+      <input id="login-username" type="text" autocomplete="username" placeholder="Enter username">
+      <label for="login-password" style="margin-top:10px;">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" placeholder="Enter password">
+      <p class="hint">Local accounts created during setup or assigned by your administrator.</p>
+    </div>
+
+    <div id="wizard-fields" hidden>
+      <div id="wizard-step-1">
+        <label for="wizard-unlock-key">Unlock key</label>
+        <input id="wizard-unlock-key" type="password" autocomplete="off" placeholder="Paste unlock key">
+        <p class="hint">The initial unlock key was generated and stored in <code>.taskforge/initial_admin_password</code>.</p>
+      </div>
+      <div id="wizard-step-2" hidden>
+        <label for="wizard-username">Administrator username</label>
+        <input id="wizard-username" type="text" autocomplete="username" placeholder="admin">
+        <label for="wizard-password" style="margin-top:10px;">Administrator password</label>
+        <input id="wizard-password" type="password" autocomplete="new-password" placeholder="Choose a secure password">
+        <label for="wizard-url" style="margin-top:10px;">Instance URL</label>
+        <input id="wizard-url" type="url" placeholder="http://127.0.0.1:8080">
+      </div>
+    </div>
+
+    <p id="login-error" class="error-text" role="alert"></p>
+    <button class="primary" id="connect" type="submit">Open workspace →</button>
+    <div class="login-foot">Authenticated access · No simulated results</div>
+  </form>
+</section>
 <div id="workspace" class="app-shell" hidden><aside class="sidebar"><a class="brand" href="#overview"><span class="brand-mark">TF</span><span>TaskForge<small>PIPELINE OPERATIONS</small></span></a><span class="nav-label">WORKSPACE</span><nav id="navigation" aria-label="Main navigation"></nav><div class="sidebar-bottom"><span class="status-dot"></span><span id="connection">Connected</span><small id="identity"></small></div></aside>
 <div class="main-wrap"><header class="topbar"><div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb">Overview</strong></div><div class="topbar-actions"><button id="refresh" class="quiet">Refresh</button><button id="theme" class="quiet">Light mode</button><button id="logout" class="quiet">Sign out</button></div></header><div id="connection-error" class="connection-error" role="alert" hidden></div><main id="main" tabindex="-1"><div class="page-heading"><div><span class="eyebrow" id="page-eyebrow">WORKSPACE PULSE</span><h1 id="page-title">Overview</h1><p id="page-description" class="muted"></p></div><div id="page-actions"></div></div><div id="content" aria-live="polite"></div><footer>TaskForge · <span id="updated">Waiting for data</span></footer></main></div></div>
 <dialog id="editor" aria-labelledby="dialog-title"><div class="dialog-heading"><div><span class="eyebrow" id="dialog-eyebrow">CONFIGURATION</span><h2 id="dialog-title">Create job</h2></div><button class="icon-button" id="close-dialog" aria-label="Close dialog">×</button></div><div id="dialog-content"></div></dialog><div id="toast-region" class="toast-region" role="status" aria-live="polite"></div></body></html>

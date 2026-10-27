@@ -82,6 +82,83 @@ async function action(path,body,success='Request accepted'){
   }
 }
 
+let authMode = 'token';
+let wizardSetupToken = '';
+
+function setAuthMode(mode){
+  authMode = mode;
+  $('login-error').textContent = '';
+  if(mode === 'token'){
+    $('tab-token')?.classList.add('active');
+    $('tab-password')?.classList.remove('active');
+    $('tab-wizard')?.classList.remove('active');
+    $('token-fields').hidden = false;
+    $('password-fields').hidden = true;
+    $('wizard-fields').hidden = true;
+    $('auth-mode-switch').hidden = false;
+    $('auth-card-eyebrow').textContent = 'YOUR OPERATIONS WORKSPACE';
+    $('auth-card-title').innerHTML = 'From commit<br>to confidence.';
+    $('auth-card-desc').textContent = 'Manage jobs, follow every run, and release with a clear record of what changed.';
+    $('connect').textContent = 'Open workspace →';
+  } else if(mode === 'password'){
+    $('tab-password')?.classList.add('active');
+    $('tab-token')?.classList.remove('active');
+    $('tab-wizard')?.classList.remove('active');
+    $('token-fields').hidden = true;
+    $('password-fields').hidden = false;
+    $('wizard-fields').hidden = true;
+    $('auth-mode-switch').hidden = false;
+    $('auth-card-eyebrow').textContent = 'LOCAL AUTHENTICATION';
+    $('auth-card-title').innerHTML = 'Sign in with<br>credentials.';
+    $('auth-card-desc').textContent = 'Enter your local TaskForge username and password to access the workspace.';
+    $('connect').textContent = 'Sign in →';
+  } else if(mode === 'wizard_step1'){
+    $('tab-wizard')?.classList.add('active');
+    $('tab-token')?.classList.remove('active');
+    $('tab-password')?.classList.remove('active');
+    $('token-fields').hidden = true;
+    $('password-fields').hidden = true;
+    $('wizard-fields').hidden = false;
+    $('wizard-step-1').hidden = false;
+    $('wizard-step-2').hidden = true;
+    $('auth-mode-switch').hidden = false;
+    $('auth-card-eyebrow').textContent = 'INITIAL UNLOCK';
+    $('auth-card-title').innerHTML = 'Welcome to<br>TaskForge.';
+    $('auth-card-desc').textContent = 'To get started, unlock the server with the initial admin password from your data directory.';
+    $('connect').textContent = 'Unlock TaskForge →';
+  } else if(mode === 'wizard_step2'){
+    $('tab-wizard')?.classList.add('active');
+    $('tab-token')?.classList.remove('active');
+    $('tab-password')?.classList.remove('active');
+    $('token-fields').hidden = true;
+    $('password-fields').hidden = true;
+    $('wizard-fields').hidden = false;
+    $('wizard-step-1').hidden = true;
+    $('wizard-step-2').hidden = false;
+    $('auth-mode-switch').hidden = false;
+    $('auth-card-eyebrow').textContent = 'INITIAL ADMINISTRATOR';
+    $('auth-card-title').innerHTML = 'Create your<br>account.';
+    $('auth-card-desc').textContent = 'Set up the primary administrator account and configure instance settings.';
+    $('connect').textContent = 'Complete Setup →';
+  }
+}
+
+$('tab-token')?.addEventListener('click',()=>setAuthMode('token'));
+$('tab-password')?.addEventListener('click',()=>setAuthMode('password'));
+$('tab-wizard')?.addEventListener('click',()=>setAuthMode('wizard_step1'));
+
+
+function enterWorkspace(){
+  $('access-token').value='';
+  if($('login-password')) $('login-password').value='';
+  $('login').hidden=true;
+  $('workspace').hidden=false;
+  $('identity').textContent=state.session.name+' · '+state.session.role;
+  buildNavigation();
+  navigate(location.hash.slice(1)||'overview');
+  refresh();
+}
+
 function signOut(){
   sessionStorage.removeItem('taskforge-token');
   state.token='';
@@ -90,6 +167,7 @@ function signOut(){
   $('editor').close();
   $('workspace').hidden=true;
   $('login').hidden=false;
+  setAuthMode('token');
   $('access-token').focus();
 }
 
@@ -97,38 +175,96 @@ $('login-form').addEventListener('submit',async event=>{
   event.preventDefault();
   $('connect').disabled=true;
   $('login-error').textContent='';
-  state.token=$('access-token').value.trim();
   try{
+    if(authMode === 'wizard_step1'){
+      const key = $('wizard-unlock-key').value.trim();
+      const res = await fetch('/api/system/setup/unlock', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key})
+      });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({}));
+        throw new Error(err.detail || 'Invalid unlock key');
+      }
+      const data = await res.json();
+      wizardSetupToken = data.setup_token;
+      setAuthMode('wizard_step2');
+      return;
+    }
+    if(authMode === 'wizard_step2'){
+      const username = $('wizard-username').value.trim();
+      const password = $('wizard-password').value;
+      const instance_url = $('wizard-url').value.trim();
+      const res = await fetch('/api/system/setup/complete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({setup_token: wizardSetupToken, username, password, instance_url})
+      });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({}));
+        throw new Error(err.detail || 'Setup completion failed');
+      }
+      const data = await res.json();
+      state.token = data.token;
+      state.session = {name: data.name, role: data.role, projects: data.projects};
+      sessionStorage.setItem('taskforge-token', state.token);
+      enterWorkspace();
+      toast('Setup completed successfully! Welcome to TaskForge.');
+      return;
+    }
+    if(authMode === 'password'){
+      const username = $('login-username').value.trim();
+      const password = $('login-password').value;
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username, password})
+      });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({}));
+        throw new Error(err.detail || 'Invalid username or password');
+      }
+      const data = await res.json();
+      state.token = data.token;
+      state.session = {name: data.name, role: data.role, projects: data.projects};
+      sessionStorage.setItem('taskforge-token', state.token);
+      enterWorkspace();
+      return;
+    }
+    state.token=$('access-token').value.trim();
     state.session=await api('/session');
     sessionStorage.setItem('taskforge-token',state.token);
-    $('access-token').value='';
-    $('login').hidden=true;
-    $('workspace').hidden=false;
-    $('identity').textContent=state.session.name+' · '+state.session.role;
-    buildNavigation();
-    navigate(location.hash.slice(1)||'overview');
-    await refresh();
+    enterWorkspace();
   }catch(error){
     $('login-error').textContent=error.message;
-    state.token='';
-    sessionStorage.removeItem('taskforge-token');
+    if(authMode==='token'){
+      state.token='';
+      sessionStorage.removeItem('taskforge-token');
+    }
   }finally{
     $('connect').disabled=false;
   }
 });
 
 async function initSession(){
+  try{
+    const res = await fetch('/api/system/setup-status');
+    const data = await res.json();
+    if(data.requires_unlock){
+      if($('tab-wizard')) $('tab-wizard').hidden = false;
+      if(location.hash === '#setup'){
+        setAuthMode('wizard_step1');
+        return;
+      }
+    }
+  }catch(_){}
   const savedToken=sessionStorage.getItem('taskforge-token');
   if(!savedToken)return;
   state.token=savedToken;
   try{
     state.session=await api('/session');
-    $('login').hidden=true;
-    $('workspace').hidden=false;
-    $('identity').textContent=state.session.name+' · '+state.session.role;
-    buildNavigation();
-    navigate(location.hash.slice(1)||'overview');
-    await refresh();
+    enterWorkspace();
   }catch(_){
     signOut();
   }
@@ -325,22 +461,34 @@ function jobsPage(content){
   const jobs=filtered(state.jobs);
   content.append(panel('Job definitions',jobs.length?table(
     ['Job','Schedule','Executor','State','Actions'],
-    jobs.map(job=>el('tr',{},
-      nameCell(job.name,job.project+' · v'+job.version),
-      cell(job.trigger,el('small',{},job.trigger_expr)),
-      cell(job.executor),
-      cell(badge(job.status)),
-      cell(
-        button('Run',async()=>{
-          const run=await action('/jobs/'+job.id+'/run',undefined,'Run queued');
-          if(run)openRun(run.id);
-        },'',!canOperate()),
-        button(job.status==='paused'?'Resume':'Pause',()=>action('/jobs/'+job.id+'/'+(job.status==='paused'?'resume':'pause')),'',!canOperate()),
-        button('YAML',()=>showYamlModal('job',job.id),'quiet'),
-        button('Edit',()=>editJob(job),'',!isAdmin()),
-        button('Delete',()=>deleteJob(job),'danger',!isAdmin())
-      )
-    ))
+    jobs.map(job=>{
+      const isDis = job.enabled === false;
+      const stepCount = (job.steps && job.steps.length) ? ' (' + job.steps.length + ' steps)' : '';
+      return el('tr',{},
+        nameCell(job.name + (isDis ? ' [DISABLED]' : ''), job.project+' · v'+job.version),
+        cell(job.trigger,el('small',{},job.trigger_expr)),
+        cell(job.executor + stepCount),
+        cell(isDis ? badge('disabled') : badge(job.status)),
+        cell(
+          button('Run',async()=>{
+            if(job.parameters && job.parameters.length > 0){
+              openBuildWithParametersDialog(job);
+            } else {
+              const run=await action('/jobs/'+job.id+'/run',undefined,'Run queued');
+              if(run)openRun(run.id);
+            }
+          },'',!canOperate() || isDis),
+          button(isDis ? 'Enable' : 'Disable',()=>action('/jobs/'+job.id+'/'+(isDis ? 'enable' : 'disable'),undefined,isDis ? 'Job enabled' : 'Job disabled'),'quiet',!canOperate()),
+          button(job.status==='paused'?'Resume':'Pause',()=>action('/jobs/'+job.id+'/'+(job.status==='paused'?'resume':'pause')),'',!canOperate()),
+          button('Workspace',()=>openWorkspaceDialog(job),'quiet'),
+          button('Copy',()=>copyJobDialog(job),'quiet',!isAdmin()),
+          button('Rename',()=>renameJobDialog(job),'quiet',!isAdmin()),
+          button('YAML',()=>showYamlModal('job',job.id),'quiet'),
+          button('Edit',()=>editJob(job),'',!isAdmin()),
+          button('Delete',()=>deleteJob(job),'danger',!isAdmin())
+        )
+      );
+    })
   ):empty(
     state.query?'No matching jobs':'Start with one useful job',
     state.query?'Try another name or project.':'Create a task or import from YAML, choose when it runs, and follow its actual output.',
@@ -351,16 +499,20 @@ function jobsPage(content){
 
 function runTable(runs){
   if(!runs.length)return empty('No executions yet','Run a job or pipeline to see its status, logs, and artifacts here.');
-  return table(['Execution','Status','Created','Actions'],runs.map(run=>el('tr',{},
-    nameCell(run.name,run.project+' · '+run.kind+(run.commit?' · '+run.commit.slice(0,7):'')),
-    cell(badge(run.status)),
-    cell(date(run.created)),
-    cell(
-      button('Inspect',()=>openRun(run.id)),
-      run.status==='waiting_approval'&&isAdmin()?button('Review',()=>reviewDeployment(run),'primary'):null,
-      run.kind==='deployment'&&['failed','cancelled','lost'].includes(run.status)&&isAdmin()?button('Reconcile',()=>reconcileDeployment(run)):null
-    )
-  )));
+  return table(['Execution','Status','Created','Actions'],runs.map(run=>{
+    const buildTag = (run.buildNumber || run.build_number) ? ' #' + (run.buildNumber || run.build_number) : '';
+    const causeText = run.cause?.type ? ' · ' + run.cause.type : '';
+    return el('tr',{},
+      nameCell(run.name + buildTag, run.project+' · '+run.kind + causeText + (run.commit?' · '+run.commit.slice(0,7):'')),
+      cell(badge(run.status)),
+      cell(date(run.created)),
+      cell(
+        button('Inspect',()=>openRun(run.id)),
+        run.status==='waiting_approval'&&isAdmin()?button('Review',()=>reviewDeployment(run),'primary'):null,
+        run.kind==='deployment'&&['failed','cancelled','lost'].includes(run.status)&&isAdmin()?button('Reconcile',()=>reconcileDeployment(run)):null
+      )
+    );
+  }));
 }
 
 function runsPage(content){
@@ -1063,6 +1215,171 @@ async function showYamlModal(kind, id){
   }
 }
 
+function openBuildWithParametersDialog(job){
+  const content=dialog('Build with Parameters', 'PARAMETRIZED EXECUTION');
+  content.append(el('p',{className:'muted'},'Specify runtime parameter values for job ',el('strong',{},job.name),'.'));
+  const form=el('form',{className:'param-form'});
+  const inputs={};
+
+  (job.parameters||[]).forEach(param=>{
+    const wrap=el('div',{className:'param-field'});
+    const lbl=el('label',{for:'param-'+param.name},param.name + (param.type==='choice'?' (Choice)':''));
+    wrap.append(lbl);
+    if(param.type==='choice'){
+      const select=el('select',{id:'param-'+param.name,className:'select-input',style:'width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:var(--radius-sm);'});
+      (param.choices||[]).forEach(opt=>{
+        const option=el('option',{value:opt},opt);
+        if(opt===param.default_value)option.selected=true;
+        select.append(option);
+      });
+      inputs[param.name]=()=>select.value;
+      wrap.append(select);
+    } else if(param.type==='boolean'){
+      const cb=el('input',{type:'checkbox',id:'param-'+param.name});
+      cb.checked=Boolean(param.default_value);
+      inputs[param.name]=()=>cb.checked;
+      wrap.append(el('div',{style:'display:flex;align-items:center;gap:8px;margin-top:6px;'},cb,el('span',{},param.description||param.name)));
+    } else if(param.type==='text'){
+      const ta=el('textarea',{id:'param-'+param.name,rows:4,placeholder:param.default_value||'',style:'width:100%;'});
+      ta.value=param.default_value||'';
+      inputs[param.name]=()=>ta.value;
+      wrap.append(ta);
+    } else if(param.type==='password'){
+      const pw=el('input',{type:'password',id:'param-'+param.name,placeholder:'Masked sensitive input',style:'width:100%;'});
+      inputs[param.name]=()=>pw.value;
+      wrap.append(pw);
+    } else {
+      const txt=el('input',{type:'text',id:'param-'+param.name,placeholder:param.default_value||'',style:'width:100%;'});
+      txt.value=param.default_value||'';
+      inputs[param.name]=()=>txt.value;
+      wrap.append(txt);
+    }
+    if(param.description&&param.type!=='boolean')wrap.append(el('small',{},param.description));
+    form.append(wrap);
+  });
+
+  content.append(saveForm(form,async()=>{
+    const params={};
+    for(const [k,getter] of Object.entries(inputs)){
+      params[k]=getter();
+    }
+    const run=await action('/jobs/'+encodeURIComponent(job.id)+'/run',{parameters:params},'Parameterized run queued');
+    if(run)openRun(run.id);
+  },'Build'));
+}
+
+function copyJobDialog(job){
+  const content=dialog('Copy job: '+job.name,'DUPLICATE DEFINITION');
+  const form=el('form');
+  const idInput=el('input',{required:true,value:job.id+'-copy'});
+  const nameInput=el('input',{value:job.name+' (Copy)'});
+  form.append(
+    el('label',{},'New Job ID (Identifier)'),idInput,
+    el('label',{style:'margin-top:10px;'},'New Display Name'),nameInput
+  );
+  content.append(saveForm(form,async()=>{
+    const newId=idInput.value.trim();
+    const newName=nameInput.value.trim();
+    await action(`/jobs/${encodeURIComponent(job.id)}/copy?new_id=${encodeURIComponent(newId)}&new_name=${encodeURIComponent(newName)}`,undefined,'Job copied');
+  },'Create copy'));
+}
+
+function renameJobDialog(job){
+  const content=dialog('Rename job: '+job.name,'UPDATE JOB IDENTITY');
+  const form=el('form');
+  const idInput=el('input',{required:true,value:job.id});
+  const nameInput=el('input',{value:job.name});
+  form.append(
+    el('label',{},'Job ID (Identifier)'),idInput,
+    el('label',{style:'margin-top:10px;'},'New Display Name'),nameInput
+  );
+  content.append(saveForm(form,async()=>{
+    const newId=idInput.value.trim();
+    const newName=nameInput.value.trim();
+    await action(`/jobs/${encodeURIComponent(job.id)}/rename?new_id=${encodeURIComponent(newId)}&new_name=${encodeURIComponent(newName)}`,undefined,'Job renamed');
+  },'Rename job'));
+}
+
+async function openWorkspaceDialog(job){
+  const content=dialog('Workspace: '+job.name,'SAFE FILE BROWSER');
+  let currentPath='';
+  const breadcrumb=el('div',{style:'font-family:monospace;margin-bottom:10px;color:var(--text-muted);'});
+  const fileViewer=el('pre',{className:'log-terminal',style:'max-height:260px;margin-top:12px;',hidden:true});
+  const fileViewerTitle=el('strong',{},'');
+  const fileViewerBar=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-top:12px;',hidden:true},fileViewerTitle,button('Close file',()=>toggleViewer(false),'quiet'));
+  const treeContainer=el('div',{className:'workspace-tree'});
+  const actionsBar=el('div',{className:'form-actions',style:'margin-top:14px;'},
+    button('Wipe Workspace',async()=>{
+      if(!confirm('Are you sure you want to clean the workspace directory? All temporary build files will be permanently deleted.'))return;
+      await action('/jobs/'+encodeURIComponent(job.id)+'/workspace/wipe',undefined,'Workspace wiped');
+      loadTree('');
+    },'danger',!canOperate()),
+    button('Close',()=>$('editor').close(),'quiet')
+  );
+
+  content.append(breadcrumb,treeContainer,fileViewerBar,fileViewer,actionsBar);
+
+  function toggleViewer(show,title='',content=''){
+    fileViewerBar.hidden=!show;
+    fileViewer.hidden=!show;
+    if(show){
+      fileViewerTitle.textContent=title;
+      fileViewer.textContent=content;
+    }
+  }
+
+  async function loadTree(subpath){
+    currentPath=subpath;
+    breadcrumb.textContent='Workspace: /' + (subpath||'');
+    toggleViewer(false);
+    treeContainer.textContent='Loading directory…';
+    try{
+      const data=await api('/jobs/'+encodeURIComponent(job.id)+'/workspace?path='+encodeURIComponent(subpath));
+      if(!data.exists){
+        treeContainer.replaceChildren(el('div',{style:'padding:16px;color:var(--muted);'},'Workspace has not been initialized or is empty. Run the job to generate files.'));
+        return;
+      }
+      const items=[];
+      if(subpath){
+        const parentParts=subpath.split('/').filter(Boolean);
+        parentParts.pop();
+        const parentPath=parentParts.join('/');
+        items.push(el('div',{className:'workspace-item'},
+          el('button',{type:'button',className:'inline-link',onclick:()=>loadTree(parentPath)},'📁 .. (Parent directory)')
+        ));
+      }
+      for(const entry of data.entries){
+        if(entry.is_dir){
+          items.push(el('div',{className:'workspace-item'},
+            el('button',{type:'button',className:'inline-link',onclick:()=>loadTree((subpath?subpath+'/':'')+entry.name)},'📁 '+entry.name),
+            el('small',{},date(entry.modified))
+          ));
+        } else {
+          items.push(el('div',{className:'workspace-item'},
+            el('button',{type:'button',className:'inline-link',onclick:()=>loadFile((subpath?subpath+'/':'')+entry.name)},'📄 '+entry.name),
+            el('small',{},formatBytes(entry.size))
+          ));
+        }
+      }
+      if(!items.length)items.push(el('div',{style:'padding:16px;color:var(--muted);'},'This folder is empty.'));
+      treeContainer.replaceChildren(...items);
+    }catch(err){
+      treeContainer.textContent='Error loading workspace: '+err.message;
+    }
+  }
+
+  async function loadFile(filePath){
+    try{
+      const fileData=await api('/jobs/'+encodeURIComponent(job.id)+'/workspace/file?path='+encodeURIComponent(filePath));
+      toggleViewer(true,'File: '+fileData.name+' ('+formatBytes(fileData.size)+')',fileData.content);
+    }catch(err){
+      toast(err.message,true);
+    }
+  }
+
+  loadTree('');
+}
+
 async function openRun(id){
   const content=dialog('Execution details','LIVE RUN RECORD');
   const summary=el('div',{},'Loading execution…');
@@ -1138,17 +1455,39 @@ async function openRun(id){
       logs.textContent=output||(terminal.has(run.status)?'No output was recorded.':'Waiting for runner output…');
       if(autoScroll)logs.scrollTop=logs.scrollHeight;
 
+      const buildTag = (run.buildNumber || run.build_number) ? ' #' + (run.buildNumber || run.build_number) : '';
+      let causeStr = run.cause?.type || 'manual';
+      if(run.cause?.type === 'upstream'){
+        causeStr = 'Upstream ' + (run.cause.upstream_job || '') + (run.cause.upstream_build ? ' #' + run.cause.upstream_build : '');
+      } else if(run.cause?.user){
+        causeStr += ' (' + run.cause.user + ')';
+      }
+      const detailItems = [
+        ['Execution', run.name + buildTag],
+        ['Project', run.project],
+        ['Trigger', causeStr],
+        ['Created', date(run.created)],
+        ['Finished', date(run.finished)],
+        ['Run ID', run.id],
+        ['Revision', run.commit ? run.commit.slice(0, 8) : 'Definition v' + (run.definition_version || '—')]
+      ];
+      if(run.keepForever || run.keep_forever){
+        detailItems.push(['Retention', '★ Kept Forever']);
+      }
+
       summary.replaceChildren(
         badge(run.status),
-        el('div',{className:'detail-grid'},...[
-          ['Execution',run.name],
-          ['Project',run.project],
-          ['Created',date(run.created)],
-          ['Finished',date(run.finished)],
-          ['Run ID',run.id],
-          ['Revision',run.commit?run.commit.slice(0,8):'Definition v'+(run.definition_version||'—')]
-        ].map(([key,value])=>el('div',{className:'detail-item'},el('small',{},key),el('strong',{},value))))
+        el('div',{className:'detail-grid'},...detailItems.map(([key,value])=>el('div',{className:'detail-item'},el('small',{},key),el('strong',{},value))))
       );
+
+      if(run.parameters && Object.keys(run.parameters).length){
+        const paramTags = el('div', {style: 'margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;'});
+        paramTags.append(el('strong', {style: 'font-size: 0.8rem; margin-right: 4px; color: var(--text-muted);'}, 'Parameters:'));
+        for(const [k, v] of Object.entries(run.parameters)){
+          paramTags.append(el('span', {className: 'step-tag'}, k + '=' + String(v)));
+        }
+        summary.append(paramTags);
+      }
 
       if(run.result.error)summary.append(el('p',{className:'error-text'},run.result.error));
       if(run.result.steps){
@@ -1166,20 +1505,21 @@ async function openRun(id){
         summary.append(el('p',{className:'hint'},run.result.attempts.map(a=>'Attempt '+a.number+': exit '+a.exit_code+', '+a.duration_seconds+'s').join(' · ')));
       }
 
-      const runArtifacts=run.result.artifacts||[];
+      const runArtifacts=run.result.artifacts||run.artifacts||[];
       if(!runArtifacts.length){
         artifacts.replaceChildren(el('p',{className:'hint'},'No artifacts were published in this run.'));
       }else{
         artifacts.replaceChildren(...runArtifacts.map(artifact=>el('div',{className:'artifact'},
           el('div',{},
-            el('strong',{},artifact.name),
-            el('small',{},'SHA256: '+artifact.sha256.slice(0,16)+'… · '+formatBytes(artifact.size))
+            el('strong',{},artifact.path || artifact.name),
+            el('small',{},'SHA256: '+(artifact.sha256 ? artifact.sha256.slice(0,16)+'…' : '—') + (artifact.md5 ? ' · MD5: '+artifact.md5.slice(0,8)+'…' : '') + ' · '+formatBytes(artifact.size))
           ),
           el('div',{className:'artifact-actions'},
-            button('Preview',()=>previewArtifact(artifact.sha256,artifact.name),'quiet'),
+            artifact.sha256 ? button('Preview',()=>previewArtifact(artifact.sha256,artifact.name),'quiet') : null,
             button('Download',async()=>{
               try{
-                const response=await fetch('/api/runs/'+id+'/artifacts/'+artifact.sha256,{headers:{Authorization:'Bearer '+state.token}});
+                const targetKey = artifact.path || artifact.sha256;
+                const response=await fetch('/api/runs/'+id+'/artifacts/'+encodeURIComponent(targetKey),{headers:{Authorization:'Bearer '+state.token}});
                 if(!response.ok)throw new Error('Artifact download failed');
                 download(await response.blob(),artifact.name);
               }catch(error){toast(error.message,true);}
@@ -1190,6 +1530,10 @@ async function openRun(id){
 
       actions.replaceChildren(...[
         button('Download log',()=>download(new Blob([output],{type:'text/plain'}),id+'.log')),
+        canOperate() ? button((run.keepForever || run.keep_forever) ? '★ Kept forever' : '☆ Keep this build', async()=>{
+          await action('/runs/'+id+'/keep', undefined, (run.keepForever || run.keep_forever) ? 'Removed keep forever' : 'Kept forever');
+          update();
+        }, (run.keepForever || run.keep_forever) ? 'primary' : 'quiet') : null,
         !terminal.has(run.status)&&canOperate()?button(run.cancel?'Cancellation requested':'Cancel execution',async()=>{
           await action('/runs/'+id+'/cancel',undefined,'Cancellation requested');
           update();

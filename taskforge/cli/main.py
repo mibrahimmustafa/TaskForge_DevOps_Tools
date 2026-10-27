@@ -253,6 +253,105 @@ def migrate_legacy(source: Path):
     asyncio.run(migrate())
 
 
+@app.command("build")
+def build_job(
+    job_id: str = typer.Argument(..., help="Job identifier to build"),
+    param: list[str] = typer.Option([], "--param", "-p", help="Parameter in KEY=VALUE format"),
+    follow: bool = typer.Option(
+        False, "--follow", "-f", help="Follow execution logs until completion"
+    ),
+    wait: bool = typer.Option(False, "--wait", "-w", help="Wait for build completion"),
+):
+    """Trigger a build of a job, with optional parameters and live log streaming."""
+    token = os.getenv("TASKFORGE_API_TOKEN", "")
+    if not token:
+        raise typer.BadParameter("Set TASKFORGE_API_TOKEN")
+    base = os.getenv("TASKFORGE_API_URL", "http://127.0.0.1:8080").rstrip("/")
+    params_dict = {}
+    for p in param:
+        if "=" in p:
+            k, v = p.split("=", 1)
+            params_dict[k.strip()] = v.strip()
+
+    with httpx.Client(timeout=30, trust_env=False) as client:
+        res = client.post(
+            f"{base}/api/jobs/{job_id}/run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"parameters": params_dict},
+        )
+        if res.is_error:
+            typer.echo(res.text, err=True)
+            raise typer.Exit(1)
+        data = res.json()
+        run_id = data.get("id")
+        build_num = data.get("payload", {}).get("build_number") or data.get("build_number")
+        typer.echo(f"Enqueued build #{build_num} (run ID: {run_id})")
+
+        if follow or wait:
+            import time
+
+            cursor = 0
+            while True:
+                time.sleep(1)
+                r_status = client.get(
+                    f"{base}/api/runs/{run_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if r_status.is_error:
+                    break
+                run_info = r_status.json()
+                if follow:
+                    r_logs = client.get(
+                        f"{base}/api/runs/{run_id}/logs?after={cursor}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    if not r_logs.is_error:
+                        log_data = r_logs.json()
+                        for rec in log_data.get("records", []):
+                            typer.echo(rec["text"], nl=False)
+                            cursor = max(cursor, rec["sequence"])
+                if run_info.get("status") in {
+                    "success",
+                    "failed",
+                    "cancelled",
+                    "unstable",
+                    "timed_out",
+                    "aborted",
+                }:
+                    typer.echo(f"\nBuild finished with status: {run_info.get('status')}")
+                    if run_info.get("status") != "success":
+                        raise typer.Exit(1)
+                    break
+
+
+@app.command("console")
+def console_logs(
+    run_id: str = typer.Argument(..., help="Run ID to display logs for"),
+):
+    """Print the full console output of a run."""
+    token = os.getenv("TASKFORGE_API_TOKEN", "")
+    if not token:
+        raise typer.BadParameter("Set TASKFORGE_API_TOKEN")
+    base = os.getenv("TASKFORGE_API_URL", "http://127.0.0.1:8080").rstrip("/")
+    with httpx.Client(timeout=30, trust_env=False) as client:
+        res = client.get(
+            f"{base}/api/runs/{run_id}/logs/download",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if res.is_error:
+            typer.echo(res.text, err=True)
+            raise typer.Exit(1)
+        typer.echo(res.text)
+
+
+@app.command("artifacts")
+def list_artifacts(
+    run_id: str = typer.Argument(..., help="Run ID to list artifacts for"),
+):
+    """List archived artifacts for a run."""
+    request("GET", f"/runs/{run_id}/artifacts")
+
+
 @app.command("version")
 def version():
     typer.echo("TaskForge 0.2.0")
